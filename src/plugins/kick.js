@@ -2,9 +2,44 @@ function isGroup(jid) {
   return jid && jid.endsWith('@g.us');
 }
 
-function normalizeJid(jid) {
+// Strip device suffix (":12") but keep domain (@s.whatsapp.net / @lid)
+function stripDevice(jid) {
   if (!jid) return '';
-  return jid.split(':')[0];
+  return jid.split(':')[0].split('@')[0] + '@' + jid.split('@')[1];
+}
+
+// Extract just the numeric/user portion, ignoring domain entirely
+function userPart(jid) {
+  if (!jid) return '';
+  return jid.split('@')[0].split(':')[0];
+}
+
+// Build every possible identifier we can find for a "sender-like" object
+function candidateIds(...jids) {
+  const set = new Set();
+  for (const j of jids) {
+    if (!j) continue;
+    set.add(stripDevice(j));
+    set.add(userPart(j));
+  }
+  return set;
+}
+
+// Does this participant match any of the candidate identifiers?
+function participantMatches(participant, candidates) {
+  const ids = [
+    participant.id,
+    participant.jid,
+    participant.lid,
+    participant.phoneNumber,
+  ].filter(Boolean);
+
+  for (const id of ids) {
+    if (candidates.has(stripDevice(id)) || candidates.has(userPart(id))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getTargetJid(msg) {
@@ -13,14 +48,11 @@ function getTargetJid(msg) {
     msg.message?.imageMessage?.contextInfo ||
     msg.message?.videoMessage?.contextInfo;
 
-  // First priority: mentioned user
   const mentioned = context?.mentionedJid;
-
   if (mentioned && mentioned.length > 0) {
     return mentioned[0];
   }
 
-  // Second priority: quoted message sender
   if (context?.participant) {
     return context.participant;
   }
@@ -40,9 +72,6 @@ module.exports = {
   description: 'Remove a member from the group',
 
   execute: async ({ sock, msg, from }) => {
-    // -----------------------------
-    // Check if this is a group
-    // -----------------------------
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -51,24 +80,38 @@ module.exports = {
     }
 
     try {
-      // -----------------------------
-      // Get group information
-      // -----------------------------
       const metadata = await sock.groupMetadata(from);
       const participants = metadata.participants;
 
       // -----------------------------
-      // Find command sender
+      // DEBUG — remove once confirmed working
       // -----------------------------
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-
-      const sender = participants.find(
-        (p) => normalizeJid(p.id) === normalizeJid(senderJid)
+      console.log('🔍 msg.key:', JSON.stringify(msg.key, null, 2));
+      console.log('🔍 sock.user:', JSON.stringify(sock.user, null, 2));
+      console.log(
+        '🔍 participants:',
+        JSON.stringify(
+          participants.map((p) => ({ id: p.id, jid: p.jid, lid: p.lid, admin: p.admin })),
+          null,
+          2
+        )
       );
 
       // -----------------------------
-      // Check sender is admin
+      // Resolve sender
       // -----------------------------
+      const senderCandidates = candidateIds(
+        msg.key.participant,
+        msg.key.participantAlt,
+        msg.key.participantPn,
+        msg.key.remoteJid
+      );
+
+      const sender = participants.find((p) => participantMatches(p, senderCandidates));
+
+      console.log('🔍 senderCandidates:', [...senderCandidates]);
+      console.log('🔍 matched sender:', sender);
+
       if (!isAdmin(sender)) {
         await sock.sendMessage(from, {
           text: '🚫 Only group admins can use `.kick`.',
@@ -77,17 +120,19 @@ module.exports = {
       }
 
       // -----------------------------
-      // Find bot account
+      // Resolve bot
       // -----------------------------
-      const botJid = normalizeJid(sock.user?.id);
-
-      const bot = participants.find(
-        (p) => normalizeJid(p.id) === botJid
+      const botCandidates = candidateIds(
+        sock.user?.id,
+        sock.user?.lid,
+        sock.user?.jid
       );
 
-      // -----------------------------
-      // Check bot is admin
-      // -----------------------------
+      const bot = participants.find((p) => participantMatches(p, botCandidates));
+
+      console.log('🔍 botCandidates:', [...botCandidates]);
+      console.log('🔍 matched bot:', bot);
+
       if (!isAdmin(bot)) {
         await sock.sendMessage(from, {
           text: '⚠️ I need to be a group admin before I can remove members.',
@@ -96,7 +141,7 @@ module.exports = {
       }
 
       // -----------------------------
-      // Find target
+      // Resolve target
       // -----------------------------
       const target = getTargetJid(msg);
 
@@ -109,13 +154,9 @@ module.exports = {
         return;
       }
 
-      const targetJid = normalizeJid(target);
-
-      // -----------------------------
-      // Check target exists
-      // -----------------------------
-      const targetParticipant = participants.find(
-        (p) => normalizeJid(p.id) === targetJid
+      const targetCandidates = candidateIds(target);
+      const targetParticipant = participants.find((p) =>
+        participantMatches(p, targetCandidates)
       );
 
       if (!targetParticipant) {
@@ -125,9 +166,6 @@ module.exports = {
         return;
       }
 
-      // -----------------------------
-      // Prevent kicking admins
-      // -----------------------------
       if (isAdmin(targetParticipant)) {
         await sock.sendMessage(from, {
           text: '🚫 I cannot remove another group admin.',
@@ -135,10 +173,7 @@ module.exports = {
         return;
       }
 
-      // -----------------------------
-      // Prevent kicking the bot
-      // -----------------------------
-      if (targetJid === botJid) {
+      if (participantMatches(targetParticipant, botCandidates)) {
         await sock.sendMessage(from, {
           text: '🤖 I cannot remove myself from the group.',
         });
@@ -154,16 +189,13 @@ module.exports = {
         'remove'
       );
 
-      // -----------------------------
-      // Success message
-      // -----------------------------
       await sock.sendMessage(from, {
         text:
           '╭───〔 ✦ *MODERATION* ✦ 〕───╮\n' +
           '│\n' +
           '│  ✅ *Member Removed*\n' +
           '│\n' +
-          `│  👤 User: @${targetJid.split('@')[0]}\n` +
+          `│  👤 User: @${userPart(targetParticipant.id)}\n` +
           '│  🛡️ Action: Kick\n' +
           '│\n' +
           '╰────────────────────────╯\n\n' +
