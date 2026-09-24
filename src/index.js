@@ -11,6 +11,16 @@ const express = require('express');
 const { useDatabaseBackedAuthState } = require('./auth/folderBackupAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
 
+// Prevent the whole process from crashing on unexpected errors deep
+// inside Baileys/libsignal. We log them instead of letting Node exit.
+process.on('uncaughtException', (err) => {
+  console.error('🔥 Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('🔥 Unhandled Rejection:', reason);
+});
+
 const PREFIX = process.env.PREFIX || '.';
 const BOT_NAME = process.env.BOT_NAME || 'Orefyspace WhatsApp Bot';
 const USE_PAIRING_CODE = process.env.USE_PAIRING_CODE === 'true';
