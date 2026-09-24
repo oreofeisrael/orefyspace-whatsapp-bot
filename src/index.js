@@ -7,6 +7,7 @@ const {
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
+const express = require('express');
 const { useDatabaseBackedAuthState } = require('./auth/folderBackupAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
 
@@ -78,5 +79,13 @@ async function start() {
     }
   });
 }
+
+// Lightweight HTTP server so an external uptime pinger (e.g. UptimeRobot)
+// can keep this service awake on hosts that sleep free instances after
+// a period of inactivity (like Render's free tier).
+const app = express();
+app.get('/', (req, res) => res.send(`${BOT_NAME} is alive`));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🌐 Health check server running on port ${PORT}`));
 
 start().catch((err) => console.error('Fatal error:', err));
