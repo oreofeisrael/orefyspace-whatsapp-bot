@@ -6,9 +6,10 @@ const pool = require('../db');
 
 const AUTH_FOLDER = path.join(process.cwd(), 'auth_session');
 const SESSION_KEY = 'whatsapp_session';
-const BACKUP_DEBOUNCE_MS = 8000; // avoid hammering the DB on rapid key updates
+const BACKUP_DEBOUNCE_MS = 3000; // shorter window — we want to lose as little as possible
 
 let backupTimer = null;
+let watcher = null;
 
 async function ensureTable() {
   await pool.query(`
@@ -67,11 +68,30 @@ function scheduleBackup() {
   backupTimer = setTimeout(backupSessionToDbNow, BACKUP_DEBOUNCE_MS);
 }
 
+// Watch every file change in the auth folder — this is the fix.
+// Signal session/sender-key files mutate on every message sent or
+// received, completely independent of creds.update. Without this,
+// the DB backup misses most session state and restores go stale,
+// causing "Bad MAC" decrypt failures after any restart/redeploy.
+function watchAuthFolder() {
+  if (watcher) return;
+
+  watcher = fs.watch(AUTH_FOLDER, { recursive: true }, (eventType, filename) => {
+    if (filename) {
+      scheduleBackup();
+    }
+  });
+
+  console.log('👀 Watching auth_session folder for changes...');
+}
+
 async function useDatabaseBackedAuthState() {
   await ensureTable();
   await restoreSessionFromDb();
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+
+  watchAuthFolder();
 
   const wrappedSaveCreds = async () => {
     await saveCreds();
