@@ -63,6 +63,36 @@ function getTargetJid(msg) {
   return null;
 }
 
+// Parse "10m", "2h", "1d", "30s" into milliseconds. Returns null if invalid.
+function parseDuration(text) {
+  if (!text) return null;
+  const match = text.trim().match(/^(\d+)\s*(s|m|h|d)$/i);
+  if (!match) return null;
+
+  const value = parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+
+  const multipliers = {
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+  };
+
+  return value * multipliers[unit];
+}
+
+function formatDuration(ms) {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
 module.exports = {
   isGroup,
   stripDevice,
@@ -71,4 +101,6 @@ module.exports = {
   participantMatches,
   isAdmin,
   getTargetJid,
+  parseDuration,
+  formatDuration,
 };

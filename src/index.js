@@ -10,6 +10,8 @@ const qrcode = require('qrcode-terminal');
 const express = require('express');
 const { useDatabaseBackedAuthState } = require('./auth/folderBackupAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
+const { isGroup } = require('./lib/groupUtils');
+const { getMute } = require('./lib/muteStore');
 
 // Prevent the whole process from crashing on unexpected errors deep
 // inside Baileys/libsignal. We log them instead of letting Node exit.
@@ -101,6 +103,27 @@ async function start() {
       if (!msg.message) {
         console.log('⏭️ No msg.message, skipping');
         return;
+      }
+
+      // -----------------------------
+      // Mute enforcement — runs before command handling.
+      // If the sender is currently muted in this group, delete
+      // their message and stop (don't process it as a command).
+      // -----------------------------
+      if (isGroup(msg.key.remoteJid) && !msg.key.fromMe) {
+        try {
+          const senderJid = msg.key.participantPn || msg.key.participant;
+          if (senderJid) {
+            const mute = await getMute(msg.key.remoteJid, senderJid);
+            if (mute && Number(mute.muted_until) > Date.now()) {
+              console.log('🔇 Deleting message from muted user:', senderJid);
+              await sock.sendMessage(msg.key.remoteJid, { delete: msg.key });
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('❌ Mute check error:', err);
+        }
       }
 
       const text =
