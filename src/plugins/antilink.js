@@ -1,11 +1,9 @@
 const { isGroup, candidateIds, participantMatches, isAdmin } = require('../lib/groupUtils');
-const { getSettings, setEnabled, setAction } = require('../lib/antilinkStore');
-
-const VALID_ACTIONS = ['delete', 'warn', 'kick'];
+const { getSettings, setEnabled } = require('../lib/antilinkStore');
 
 module.exports = {
   command: 'antilink',
-  description: 'Configure automatic link detection and removal',
+  description: 'Toggle automatic link detection and escalating punishment',
 
   execute: async ({ sock, msg, from, args }) => {
     if (!isGroup(from)) {
@@ -33,63 +31,43 @@ module.exports = {
         return;
       }
 
-      const rawArgs = Array.isArray(args) ? args.join(' ') : (args || '');
-      const parts = rawArgs.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      const sub = parts[0];
+      const rawArgs = (Array.isArray(args) ? args.join(' ') : (args || '')).trim().toLowerCase();
 
-      if (!sub) {
+      if (!rawArgs) {
         const settings = await getSettings(from);
         await sock.sendMessage(from, {
           text:
             '╭───〔 ✦ *ANTILINK* ✦ 〕───╮\n' +
             '│\n' +
-            `│  Status : ${settings.enabled ? '🟢 ON' : '🔴 OFF'}\n` +
-            `│  Action : ${settings.action}\n` +
+            `│  Status: ${settings.enabled ? '🟢 ON' : '🔴 OFF'}\n` +
             '│\n' +
-            '│  Usage:\n' +
-            '│  `.antilink on`\n' +
-            '│  `.antilink off`\n' +
-            '│  `.antilink set delete|warn|kick`\n' +
+            '│  Escalation on repeated links:\n' +
+            '│  1st & 2nd → delete + warn\n' +
+            '│  3rd → delete + mute 1h\n' +
+            '│  4th → delete + mute 1d\n' +
+            '│  5th → delete + kick\n' +
+            '│\n' +
+            '│  Usage: `.antilink on` / `.antilink off`\n' +
             '│\n' +
             '╰────────────────────────╯',
         });
         return;
       }
 
-      if (sub === 'on') {
+      if (rawArgs === 'on') {
         await setEnabled(from, true);
         await sock.sendMessage(from, { text: '🟢 Anti-link enabled for this group.' });
         return;
       }
 
-      if (sub === 'off') {
+      if (rawArgs === 'off') {
         await setEnabled(from, false);
         await sock.sendMessage(from, { text: '🔴 Anti-link disabled for this group.' });
         return;
       }
 
-      if (sub === 'set') {
-        const action = parts[1];
-        if (!VALID_ACTIONS.includes(action)) {
-          await sock.sendMessage(from, {
-            text: `❌ Invalid action. Choose one of: ${VALID_ACTIONS.join(', ')}`,
-          });
-          return;
-        }
-        await setAction(from, action);
-        await sock.sendMessage(from, {
-          text: `✅ Anti-link action set to *${action}*.`,
-        });
-        return;
-      }
-
       await sock.sendMessage(from, {
-        text:
-          '❌ Unknown option.\n\n' +
-          '*Usage:*\n' +
-          '`.antilink on`\n' +
-          '`.antilink off`\n' +
-          '`.antilink set delete|warn|kick`',
+        text: '❌ Unknown option. Use `.antilink on` or `.antilink off`.',
       });
 
     } catch (error) {
