@@ -93,6 +93,14 @@ function formatDuration(ms) {
   return `${days}d`;
 }
 
+// Matches http(s) links, bare www. links, and WhatsApp group invite links.
+const LINK_REGEX = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|(chat\.whatsapp\.com\/[^\s]+)/i;
+
+function containsLink(text) {
+  if (!text) return false;
+  return LINK_REGEX.test(text);
+}
+
 module.exports = {
   isGroup,
   stripDevice,
@@ -103,4 +111,5 @@ module.exports = {
   getTargetJid,
   parseDuration,
   formatDuration,
+  containsLink,
 };

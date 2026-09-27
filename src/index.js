@@ -10,11 +10,11 @@ const qrcode = require('qrcode-terminal');
 const express = require('express');
 const { useDatabaseBackedAuthState } = require('./auth/folderBackupAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
-const { isGroup } = require('./lib/groupUtils');
+const { isGroup, candidateIds, participantMatches, isAdmin, containsLink, userPart } = require('./lib/groupUtils');
 const { getMute } = require('./lib/muteStore');
+const { getSettings: getAntilinkSettings } = require('./lib/antilinkStore');
+const { addWarning, resetWarnings } = require('./lib/warnStore');
 
-// Prevent the whole process from crashing on unexpected errors deep
-// inside Baileys/libsignal. We log them instead of letting Node exit.
 process.on('uncaughtException', (err) => {
   console.error('🔥 Uncaught Exception:', err);
 });
@@ -26,13 +26,83 @@ process.on('unhandledRejection', (reason) => {
 const PREFIX = process.env.PREFIX || '.';
 const BOT_NAME = process.env.BOT_NAME || 'Orefyspace WhatsApp Bot';
 const USE_PAIRING_CODE = process.env.USE_PAIRING_CODE === 'true';
+const WARN_LIMIT = parseInt(process.env.WARN_LIMIT || '3', 10);
 
-// Loaded once — no need to reload plugins on every reconnect.
 const plugins = loadPlugins();
 console.log(`📦 Loaded ${plugins.size} command(s)`);
 
 let sock = null;
 let isStarting = false;
+
+async function handleAntilink(msg, text) {
+  const from = msg.key.remoteJid;
+
+  const settings = await getAntilinkSettings(from);
+  if (!settings.enabled) return false;
+  if (!containsLink(text)) return false;
+
+  const metadata = await sock.groupMetadata(from);
+  const participants = metadata.participants;
+
+  const senderJid = msg.key.participantPn || msg.key.participant;
+  const senderCandidates = candidateIds(senderJid);
+  const sender = participants.find((p) => participantMatches(p, senderCandidates));
+
+  // Admins are exempt
+  if (isAdmin(sender)) return false;
+
+  const botCandidates = candidateIds(sock.user?.id, sock.user?.lid);
+  const bot = participants.find((p) => participantMatches(p, botCandidates));
+
+  if (!isAdmin(bot)) {
+    console.log('⚠️ Antilink triggered but bot is not admin — cannot delete.');
+    return false;
+  }
+
+  // Always delete the offending message
+  try {
+    await sock.sendMessage(from, { delete: msg.key });
+    console.log('🔗 Deleted link from:', senderJid);
+  } catch (err) {
+    console.error('❌ Failed to delete link message:', err);
+  }
+
+  if (!sender) return true; // deleted, but can't identify sender for warn/kick
+
+  if (settings.action === 'warn') {
+    const { count } = await addWarning(from, sender.jid, 'Posting links');
+
+    await sock.sendMessage(from, {
+      text:
+        `🔗 @${userPart(sender.id)} posted a link and was warned.\n` +
+        `Warnings: ${count}/${WARN_LIMIT}`,
+      mentions: [sender.id],
+    });
+
+    if (count >= WARN_LIMIT) {
+      await sock.groupParticipantsUpdate(from, [sender.id], 'remove');
+      await resetWarnings(from, sender.jid);
+      await sock.sendMessage(from, {
+        text: `🚫 @${userPart(sender.id)} reached ${WARN_LIMIT} warnings and was removed.`,
+        mentions: [sender.id],
+      });
+    }
+  } else if (settings.action === 'kick') {
+    await sock.groupParticipantsUpdate(from, [sender.id], 'remove');
+    await sock.sendMessage(from, {
+      text: `🚫 @${userPart(sender.id)} was removed for posting a link.`,
+      mentions: [sender.id],
+    });
+  } else {
+    // action === 'delete'
+    await sock.sendMessage(from, {
+      text: `🔗 Links are not allowed here, @${userPart(sender.id)}.`,
+      mentions: [sender.id],
+    });
+  }
+
+  return true;
+}
 
 async function start() {
   if (isStarting) {
@@ -78,10 +148,10 @@ async function start() {
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         console.log('Connection closed. Reconnecting:', shouldReconnect, '| code:', statusCode);
 
-        isStarting = false; // allow a future start() call
+        isStarting = false;
 
         if (shouldReconnect) {
-          setTimeout(() => start(), 3000); // delay avoids rapid reconnect storms
+          setTimeout(() => start(), 3000);
         } else {
           console.log('Logged out. Delete the auth_session folder and the database backup, then re-link.');
         }
@@ -105,10 +175,13 @@ async function start() {
         return;
       }
 
+      const text =
+        msg.message.conversation ||
+        msg.message.extendedTextMessage?.text ||
+        '';
+
       // -----------------------------
-      // Mute enforcement — runs before command handling.
-      // If the sender is currently muted in this group, delete
-      // their message and stop (don't process it as a command).
+      // Mute enforcement
       // -----------------------------
       if (isGroup(msg.key.remoteJid) && !msg.key.fromMe) {
         try {
@@ -126,13 +199,20 @@ async function start() {
         }
       }
 
-      const text =
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        '(non-text)';
+      // -----------------------------
+      // Anti-link enforcement
+      // -----------------------------
+      if (isGroup(msg.key.remoteJid) && !msg.key.fromMe) {
+        try {
+          const handled = await handleAntilink(msg, text);
+          if (handled) return;
+        } catch (err) {
+          console.error('❌ Antilink check error:', err);
+        }
+      }
 
       console.log(
-        '🔍 Text:', text,
+        '🔍 Text:', text || '(non-text)',
         '| fromMe:', msg.key.fromMe,
         '| from:', msg.key.remoteJid,
         '| participant:', msg.key.participant
@@ -152,9 +232,6 @@ async function start() {
   }
 }
 
-// Lightweight HTTP server so an external uptime pinger (e.g. UptimeRobot)
-// can keep this service awake on hosts that sleep free instances after
-// a period of inactivity (like Render's free tier).
 const app = express();
 app.get('/', (req, res) => res.send(`${BOT_NAME} is alive`));
 const PORT = process.env.PORT || 3000;
