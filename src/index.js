@@ -11,9 +11,9 @@ const express = require('express');
 const { useDatabaseBackedAuthState } = require('./auth/folderBackupAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
 const { isGroup, candidateIds, participantMatches, isAdmin, containsLink, userPart } = require('./lib/groupUtils');
-const { getMute } = require('./lib/muteStore');
+const { getMute, setMute } = require('./lib/muteStore');
 const { getSettings: getAntilinkSettings } = require('./lib/antilinkStore');
-const { addWarning, resetWarnings } = require('./lib/warnStore');
+const { incrementStage, resetStage } = require('./lib/antilinkOffenseStore');
 
 process.on('uncaughtException', (err) => {
   console.error('🔥 Uncaught Exception:', err);
@@ -26,7 +26,19 @@ process.on('unhandledRejection', (reason) => {
 const PREFIX = process.env.PREFIX || '.';
 const BOT_NAME = process.env.BOT_NAME || 'Orefyspace WhatsApp Bot';
 const USE_PAIRING_CODE = process.env.USE_PAIRING_CODE === 'true';
-const WARN_LIMIT = parseInt(process.env.WARN_LIMIT || '3', 10);
+
+const DISOBEDIENCE_QUOTES = [
+  "Discipline is choosing between what you want now and what you want most.",
+  "Rules are not made to limit you, but to protect what you're part of.",
+  "Those who ignore warnings often become the warning for others.",
+  "A single act of disobedience can cost what patience took long to build.",
+  "The wise learn from correction; the foolish wait for consequence.",
+  "Freedom without discipline eventually destroys itself.",
+  "It is better to be corrected than to be removed.",
+  "Every warning ignored is a step closer to the exit.",
+  "Respect the space you're given, or lose the space entirely.",
+  "The rules were kind. The outcome was a choice.",
+];
 
 const plugins = loadPlugins();
 console.log(`📦 Loaded ${plugins.size} command(s)`);
@@ -34,6 +46,13 @@ console.log(`📦 Loaded ${plugins.size} command(s)`);
 let sock = null;
 let isStarting = false;
 
+// -----------------------------
+// Anti-link escalation ladder:
+//   Stage 1, 2 → delete + warn
+//   Stage 3    → delete + mute 1 hour
+//   Stage 4    → delete + mute 1 day
+//   Stage 5+   → delete + kick (with a closing quote)
+// -----------------------------
 async function handleAntilink(msg, text) {
   const from = msg.key.remoteJid;
 
@@ -59,7 +78,7 @@ async function handleAntilink(msg, text) {
     return false;
   }
 
-  // Always delete the offending message
+  // Always delete the offending message first
   try {
     await sock.sendMessage(from, { delete: msg.key });
     console.log('🔗 Deleted link from:', senderJid);
@@ -67,39 +86,55 @@ async function handleAntilink(msg, text) {
     console.error('❌ Failed to delete link message:', err);
   }
 
-  if (!sender) return true; // deleted, but can't identify sender for warn/kick
+  if (!sender) return true; // deleted, but can't identify sender for escalation
 
-  if (settings.action === 'warn') {
-    const { count } = await addWarning(from, sender.jid, 'Posting links');
+  const stage = await incrementStage(from, sender.jid);
+  console.log('🔗 Antilink stage for', senderJid, '→', stage);
 
+  if (stage === 1 || stage === 2) {
     await sock.sendMessage(from, {
       text:
         `🔗 @${userPart(sender.id)} posted a link and was warned.\n` +
-        `Warnings: ${count}/${WARN_LIMIT}`,
+        `Offense ${stage}/2 before mute.`,
       mentions: [sender.id],
     });
-
-    if (count >= WARN_LIMIT) {
-      await sock.groupParticipantsUpdate(from, [sender.id], 'remove');
-      await resetWarnings(from, sender.jid);
-      await sock.sendMessage(from, {
-        text: `🚫 @${userPart(sender.id)} reached ${WARN_LIMIT} warnings and was removed.`,
-        mentions: [sender.id],
-      });
-    }
-  } else if (settings.action === 'kick') {
-    await sock.groupParticipantsUpdate(from, [sender.id], 'remove');
-    await sock.sendMessage(from, {
-      text: `🚫 @${userPart(sender.id)} was removed for posting a link.`,
-      mentions: [sender.id],
-    });
-  } else {
-    // action === 'delete'
-    await sock.sendMessage(from, {
-      text: `🔗 Links are not allowed here, @${userPart(sender.id)}.`,
-      mentions: [sender.id],
-    });
+    return true;
   }
+
+  if (stage === 3) {
+    const mutedUntil = Date.now() + 60 * 60 * 1000; // 1 hour
+    await setMute(from, sender.jid, mutedUntil);
+    await sock.sendMessage(from, {
+      text: `🔇 @${userPart(sender.id)} posted a link again and has been muted for 1 hour.`,
+      mentions: [sender.id],
+    });
+    return true;
+  }
+
+  if (stage === 4) {
+    const mutedUntil = Date.now() + 24 * 60 * 60 * 1000; // 1 day
+    await setMute(from, sender.jid, mutedUntil);
+    await sock.sendMessage(from, {
+      text: `🔇 @${userPart(sender.id)} posted a link again and has been muted for 1 day.`,
+      mentions: [sender.id],
+    });
+    return true;
+  }
+
+  // stage >= 5 — kick
+  await sock.groupParticipantsUpdate(from, [sender.id], 'remove');
+  await resetStage(from, sender.jid);
+
+  const quote = DISOBEDIENCE_QUOTES[Math.floor(Math.random() * DISOBEDIENCE_QUOTES.length)];
+
+  await sock.sendMessage(from, {
+    text:
+      `🚫 @${userPart(sender.id)} has been removed for repeatedly posting links ` +
+      `despite multiple warnings and mutes.\n\n` +
+      `_"${quote}"_\n\n` +
+      `⚠️ Let this be a lesson to everyone else.`,
+    mentions: [sender.id],
+  });
 
   return true;
 }
