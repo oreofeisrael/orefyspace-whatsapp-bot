@@ -52,6 +52,8 @@ function extractNumber(text) {
   return digits.length >= 8 ? digits : null;
 }
 
+const { isBanned } = require('../lib/banStore');
+
 module.exports = {
   command: 'add',
   description: 'Add a member to the group by phone number',
@@ -119,6 +121,20 @@ module.exports = {
       }
 
       const targetJid = `${number}@s.whatsapp.net`;
+
+      // -----------------------------
+      // Check ban list
+      // -----------------------------
+      const banRecord = await isBanned(from, targetJid);
+      if (banRecord) {
+        await sock.sendMessage(from, {
+          text:
+            `🚫 +${number} is banned from this group` +
+            (banRecord.reason ? ` (Reason: ${banRecord.reason})` : '') +
+            `.\n\nUse \`.unban ${number}\` first if you want to add them.`,
+        });
+        return;
+      }
 
       // -----------------------------
       // Check if already in group
