@@ -1,4 +1,4 @@
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { downloadContentFromMessage, normalizeMessageContent } = require('@whiskeysockets/baileys');
 
 const MEDIA_KEYS = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'];
 
@@ -33,10 +33,17 @@ function getMedia(message) {
 }
 
 function getViewOnceMedia(message) {
-  return getMedia(unwrapViewOnce(message));
+  const unwrapped = unwrapViewOnce(message);
+  if (!unwrapped) return null;
+  return getMedia(normalizeMessageContent(unwrapped) || unwrapped);
 }
 
 async function downloadMedia(media) {
+  if (!media.value?.mediaKey) {
+    const error = new Error('View-once media no longer contains a usable decryption key');
+    error.code = 'MISSING_VIEW_ONCE_MEDIA_KEY';
+    throw error;
+  }
   const stream = await downloadContentFromMessage(media.value, media.type);
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
@@ -63,7 +70,11 @@ async function resendViewOnce({ sock, msg, from, message }) {
     await sock.sendMessage(from, payload, { quoted: msg });
     return true;
   } catch (error) {
-    console.error('❌ View-once download error:', error);
+    if (error.code === 'MISSING_VIEW_ONCE_MEDIA_KEY') {
+      console.warn('⚠️ View-once media key is missing; it may have already expired or been viewed.');
+    } else {
+      console.error('❌ View-once download error:', error);
+    }
     return false;
   }
 }
