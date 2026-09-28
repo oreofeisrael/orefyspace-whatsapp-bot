@@ -1,4 +1,7 @@
-const { downloadContentFromMessage, normalizeMessageContent } = require('@whiskeysockets/baileys');
+const {
+  generateForwardMessageContent,
+  normalizeMessageContent,
+} = require('@whiskeysockets/baileys');
 
 const MEDIA_KEYS = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'];
 
@@ -49,43 +52,39 @@ function getViewOnceMedia(message) {
   return getMedia(normalizeMessageContent(unwrapped) || unwrapped);
 }
 
-async function downloadMedia(media) {
-  if (!media.value?.mediaKey) {
-    const error = new Error('View-once media no longer contains a usable decryption key');
-    error.code = 'MISSING_VIEW_ONCE_MEDIA_KEY';
-    throw error;
-  }
-  const stream = await downloadContentFromMessage(media.value, media.type);
-  const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return Buffer.concat(chunks);
+function makeForwardableMessage(msg, message) {
+  return {
+    ...msg,
+    message,
+    key: {
+      ...(msg.key || {}),
+      remoteJid: msg.key?.remoteJid,
+      fromMe: Boolean(msg.key?.fromMe),
+    },
+  };
 }
 
 async function resendViewOnce({ sock, msg, from, message }) {
-  const source = message || getQuotedMessage(msg);
-  const media = getViewOnceMedia(source);
-  if (!media) return false;
+  const sourceMessage = message || getQuotedMessage(msg);
+  if (!getViewOnceMedia(sourceMessage)) return false;
 
   try {
-    const buffer = await downloadMedia(media);
-    const caption = media.value.caption || '';
-    const options = { caption, mimetype: media.value.mimetype };
-    let payload;
+    const source = makeForwardableMessage(msg, sourceMessage);
+    const forwardedContent = generateForwardMessageContent(source, true);
+    const normalized = normalizeMessageContent(forwardedContent) || forwardedContent;
+    const media = getMedia(normalized);
+    if (!media) return false;
 
-    if (media.type === 'image') payload = { image: buffer, ...options };
-    else if (media.type === 'video') payload = { video: buffer, ...options, gifPlayback: Boolean(media.value.gifPlayback) };
-    else if (media.type === 'audio') payload = { audio: buffer, mimetype: media.value.mimetype || 'audio/mp4', ptt: Boolean(media.value.ptt) };
-    else if (media.type === 'document') payload = { document: buffer, ...options, fileName: media.value.fileName || 'view-once-document' };
-    else payload = { sticker: buffer };
-
-    await sock.sendMessage(from, payload, { quoted: msg });
+    // The normalized content no longer has the view-once wrapper. Clear the
+    // legacy flag too for clients that include it on the media object.
+    media.value.viewOnce = false;
+    await sock.sendMessage(from, {
+      forward: { ...source, message: normalized },
+      force: true,
+    });
     return true;
   } catch (error) {
-    if (error.code === 'MISSING_VIEW_ONCE_MEDIA_KEY') {
-      console.warn('⚠️ View-once media key is missing; it may have already expired or been viewed.');
-    } else {
-      console.error('❌ View-once download error:', error);
-    }
+    console.error('❌ View-once forward error:', error);
     return false;
   }
 }
@@ -97,7 +96,7 @@ module.exports = {
     const recovered = await resendViewOnce({ sock, msg, from });
     if (!recovered) {
       await sock.sendMessage(from, {
-        text: 'Reply to a view-once image, video, audio, document, or sticker with .vv.',
+        text: 'Reply to a fresh view-once image, video, audio, document, or sticker with .vv.',
       }, { quoted: msg });
     }
   },
