@@ -32,6 +32,7 @@ module.exports = {
 │  ▸ ${PREFIX}ping
 │  ▸ ${PREFIX}menu
 │  ▸ ${PREFIX}vv (reply to view-once media)
+│  ▸ ${PREFIX}antivv on/off
 │
 ╰──────────────────────╯
 

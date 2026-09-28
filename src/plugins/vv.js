@@ -1,5 +1,7 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
+const MEDIA_KEYS = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'];
+
 function getQuotedMessage(msg) {
   const message = msg.message || {};
   return (
@@ -18,21 +20,20 @@ function unwrapViewOnce(message) {
   const wrapper = message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension;
   if (wrapper?.message) return wrapper.message;
 
-  const mediaType = Object.keys(message).find((key) =>
-    ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'].includes(key)
-  );
-  const media = mediaType ? message[mediaType] : null;
-  if (media?.viewOnce) return message;
-  return null;
+  const mediaKey = Object.keys(message).find((key) => MEDIA_KEYS.includes(key));
+  const media = mediaKey ? message[mediaKey] : null;
+  return media?.viewOnce ? message : null;
 }
 
 function getMedia(message) {
-  for (const [type, value] of Object.entries(message || {})) {
-    if (['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'].includes(type)) {
-      return { type: type.replace('Message', ''), value };
-    }
+  for (const [key, value] of Object.entries(message || {})) {
+    if (MEDIA_KEYS.includes(key)) return { type: key.replace('Message', ''), value };
   }
   return null;
+}
+
+function getViewOnceMedia(message) {
+  return getMedia(unwrapViewOnce(message));
 }
 
 async function downloadMedia(media) {
@@ -42,40 +43,42 @@ async function downloadMedia(media) {
   return Buffer.concat(chunks);
 }
 
+async function resendViewOnce({ sock, msg, from, message }) {
+  const source = message || getQuotedMessage(msg);
+  const media = getViewOnceMedia(source);
+  if (!media) return false;
+
+  try {
+    const buffer = await downloadMedia(media);
+    const caption = media.value.caption || '';
+    const options = { caption, mimetype: media.value.mimetype };
+    let payload;
+
+    if (media.type === 'image') payload = { image: buffer, ...options };
+    else if (media.type === 'video') payload = { video: buffer, ...options, gifPlayback: Boolean(media.value.gifPlayback) };
+    else if (media.type === 'audio') payload = { audio: buffer, mimetype: media.value.mimetype || 'audio/mp4', ptt: Boolean(media.value.ptt) };
+    else if (media.type === 'document') payload = { document: buffer, ...options, fileName: media.value.fileName || 'view-once-document' };
+    else payload = { sticker: buffer };
+
+    await sock.sendMessage(from, payload, { quoted: msg });
+    return true;
+  } catch (error) {
+    console.error('❌ View-once download error:', error);
+    return false;
+  }
+}
+
 module.exports = {
   command: 'vv',
   description: 'Save a replied-to view-once message as normal media',
-
   execute: async ({ sock, msg, from }) => {
-    const quoted = getQuotedMessage(msg);
-    const viewOnce = unwrapViewOnce(quoted);
-    const media = getMedia(viewOnce);
-
-    if (!media) {
+    const recovered = await resendViewOnce({ sock, msg, from });
+    if (!recovered) {
       await sock.sendMessage(from, {
         text: 'Reply to a view-once image, video, audio, document, or sticker with .vv.',
       }, { quoted: msg });
-      return;
-    }
-
-    try {
-      const buffer = await downloadMedia(media);
-      const caption = media.value.caption || '';
-      const options = { caption, mimetype: media.value.mimetype };
-      let payload;
-
-      if (media.type === 'image') payload = { image: buffer, ...options };
-      else if (media.type === 'video') payload = { video: buffer, ...options, gifPlayback: Boolean(media.value.gifPlayback) };
-      else if (media.type === 'audio') payload = { audio: buffer, mimetype: media.value.mimetype || 'audio/mp4', ptt: Boolean(media.value.ptt) };
-      else if (media.type === 'document') payload = { document: buffer, ...options, fileName: media.value.fileName || 'view-once-document' };
-      else payload = { sticker: buffer };
-
-      await sock.sendMessage(from, payload, { quoted: msg });
-    } catch (error) {
-      console.error('❌ View-once download error:', error);
-      await sock.sendMessage(from, {
-        text: 'I could not retrieve that view-once message. It may have expired or the media download failed.',
-      }, { quoted: msg });
     }
   },
+  getViewOnceMedia,
+  resendViewOnce,
 };

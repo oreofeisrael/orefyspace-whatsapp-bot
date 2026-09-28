@@ -32,8 +32,10 @@ const {
   userPart,
 } = require('./lib/groupUtils');
 const { getMute, setMute } = require('./lib/muteStore');
+const { getEnabled: getAntiViewOnceEnabled } = require('./lib/antivvStore');
 const { getSettings: getAntilinkSettings } = require('./lib/antilinkStore');
 const { incrementStage, resetStage } = require('./lib/antilinkOffenseStore');
+const { getViewOnceMedia, resendViewOnce } = require('./plugins/vv');
 
 process.on('uncaughtException', (err) => console.error('🔥 Uncaught Exception:', err));
 process.on('unhandledRejection', (reason) => console.error('🔥 Unhandled Rejection:', reason));
@@ -290,6 +292,22 @@ async function startSession(account) {
         const msg = messages[0];
         if (!msg?.message) return;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+
+        if (!msg.key.fromMe && getViewOnceMedia(msg.message)) {
+          try {
+            if (await getAntiViewOnceEnabled(session.accountId, msg.key.remoteJid)) {
+              const recovered = await resendViewOnce({
+                sock,
+                msg,
+                from: msg.key.remoteJid,
+                message: msg.message,
+              });
+              if (recovered) return;
+            }
+          } catch (error) {
+            console.error(`❌ Anti View Once error for ${session.accountId}:`, error);
+          }
+        }
 
         if (isGroup(msg.key.remoteJid) && !msg.key.fromMe) {
           try {
