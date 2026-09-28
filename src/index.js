@@ -19,6 +19,7 @@ const {
   ensureSessionSchema,
   listSessionAccounts,
   createSessionAccount,
+  updateSessionIdentity,
   useDatabaseBackedAuthState,
 } = require('./auth/multiSessionAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
@@ -61,6 +62,21 @@ const startLocks = new Map();
 const pairingRequests = new Map();
 let latestBaileysVersion;
 
+function normalizePhone(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function phoneFromJid(jid) {
+  const match = String(jid || '').match(/^(\d+)(?::\d+)?@/);
+  return match ? match[1] : null;
+}
+
+function maskPhone(phoneNumber) {
+  const value = normalizePhone(phoneNumber);
+  if (value.length < 5) return value || null;
+  return `${value.slice(0, 3)}${'*'.repeat(Math.max(2, value.length - 5))}${value.slice(-2)}`;
+}
+
 function getOrCreateSession(account) {
   let session = sessions.get(account.account_id);
   if (!session) {
@@ -70,6 +86,8 @@ function getOrCreateSession(account) {
       sock: null,
       connectionState: 'starting',
       isRegistered: null,
+      phoneNumber: account.phone_number || null,
+      waJid: account.wa_jid || null,
       qrDataUrl: null,
       lastConnectedAt: null,
       lastDisconnectAt: null,
@@ -78,6 +96,8 @@ function getOrCreateSession(account) {
     sessions.set(account.account_id, session);
   } else {
     session.label = account.label;
+    session.phoneNumber = account.phone_number || session.phoneNumber || null;
+    session.waJid = account.wa_jid || session.waJid || null;
   }
   return session;
 }
@@ -89,6 +109,7 @@ function sessionStatus(session) {
     connectionState: session.connectionState,
     whatsappConnected: session.connectionState === 'connected',
     isRegistered: session.isRegistered,
+    phoneNumber: maskPhone(session.phoneNumber),
     qrDataUrl: session.qrDataUrl,
     lastConnectedAt: session.lastConnectedAt,
     lastDisconnectAt: session.lastDisconnectAt,
@@ -253,6 +274,10 @@ async function startSession(account) {
         } else if (connection === 'open') {
           session.connectionState = 'connected';
           session.isRegistered = true;
+          session.waJid = sock.user?.id || session.waJid;
+          session.phoneNumber = phoneFromJid(session.waJid) || session.phoneNumber;
+          updateSessionIdentity(session.accountId, session.phoneNumber, session.waJid)
+            .catch((error) => console.error(`⚠️ Could not save identity for ${session.accountId}:`, error.message));
           session.lastConnectedAt = new Date().toISOString();
           session.qrDataUrl = null;
           publishStatus();
@@ -352,6 +377,16 @@ async function handlePairingCode(req, res, accountId) {
   if (!/^\d{8,15}$/.test(phoneNumber)) return res.status(400).json({ error: 'Enter a valid phone number with country code.' });
   if (!session.sock || session.isRegistered === null) return res.status(503).json({ error: 'This account is still starting. Try again shortly.' });
   if (session.isRegistered) return res.status(409).json({ error: 'This account is already linked.' });
+
+  const duplicate = [...sessions.values()].find((candidate) =>
+    candidate.accountId !== accountId && candidate.isRegistered && candidate.phoneNumber === phoneNumber
+  );
+  if (duplicate) {
+    return res.status(409).json({
+      error: `This WhatsApp number is already connected as ${duplicate.label}.`,
+      accountId: duplicate.accountId,
+    });
+  }
 
   const lastRequest = pairingRequests.get(session.accountId) || 0;
   const remaining = PAIRING_COOLDOWN_MS - (Date.now() - lastRequest);

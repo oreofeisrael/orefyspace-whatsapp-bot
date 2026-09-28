@@ -133,7 +133,8 @@
       $('account-count').textContent = `${accounts.length} account${accounts.length === 1 ? '' : 's'}`;
       $('accounts').innerHTML = accounts.map((account) => {
         const connected = account.whatsappConnected;
-        return `<article class="account-card"><strong><span class="status-dot ${connected ? 'connected' : account.connectionState === 'error' ? 'error' : ''}"></span>${escapeHtml(account.label)}</strong><code>${escapeHtml(account.accountId)}</code><span class="muted">${escapeHtml(account.connectionState)}</span></article>`;
+        const identity = account.phoneNumber ? `<span class="muted">${escapeHtml(account.phoneNumber)}</span>` : '';
+        return `<article class="account-card"><strong><span class="status-dot ${connected ? 'connected' : account.connectionState === 'error' ? 'error' : ''}"></span>${escapeHtml(account.label)}</strong><code>${escapeHtml(account.accountId)}</code>${identity}<span class="muted">${escapeHtml(account.connectionState)}</span></article>`;
       }).join('') || '<div class="empty">No WhatsApp accounts.</div>';
     }
 

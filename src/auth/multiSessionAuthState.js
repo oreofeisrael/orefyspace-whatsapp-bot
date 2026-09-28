@@ -25,11 +25,15 @@ async function ensureSessionSchema() {
       CREATE TABLE IF NOT EXISTS whatsapp_sessions (
         account_id TEXT PRIMARY KEY,
         label TEXT NOT NULL,
+        phone_number TEXT,
+        wa_jid TEXT,
         data BYTEA,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    await pool.query(`ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS phone_number TEXT`);
+    await pool.query(`ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS wa_jid TEXT`);
 
     // Preserve the existing single-account deployment as account "primary".
     try {
@@ -65,11 +69,21 @@ async function ensureSessionSchema() {
 async function listSessionAccounts() {
   await ensureSessionSchema();
   const result = await pool.query(
-    `SELECT account_id, label, created_at, updated_at
+    `SELECT account_id, label, phone_number, wa_jid, created_at, updated_at
      FROM whatsapp_sessions
      ORDER BY created_at ASC`
   );
   return result.rows;
+}
+
+async function updateSessionIdentity(accountId, phoneNumber, waJid) {
+  await ensureSessionSchema();
+  await pool.query(
+    `UPDATE whatsapp_sessions
+     SET phone_number = $2, wa_jid = $3, updated_at = NOW()
+     WHERE account_id = $1`,
+    [accountId, phoneNumber || null, waJid || null]
+  );
 }
 
 async function createSessionAccount(label = '') {
@@ -178,6 +192,7 @@ module.exports = {
   ensureSessionSchema,
   listSessionAccounts,
   createSessionAccount,
+  updateSessionIdentity,
   useDatabaseBackedAuthState,
   deleteSessionAccount,
 };
