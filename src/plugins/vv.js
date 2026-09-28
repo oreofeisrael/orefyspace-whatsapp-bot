@@ -25,6 +25,16 @@ function unwrapViewOnce(message) {
   return media?.viewOnce ? message : null;
 }
 
+function containsViewOnce(message) {
+  if (!message) return false;
+  if (message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension) return true;
+  for (const key of ['ephemeralMessage', 'documentWithCaptionMessage', 'editedMessage']) {
+    if (message[key]?.message && containsViewOnce(message[key].message)) return true;
+  }
+  const mediaKey = Object.keys(message).find((key) => MEDIA_KEYS.includes(key));
+  return Boolean(mediaKey && message[mediaKey]?.viewOnce);
+}
+
 function getMedia(message) {
   for (const [key, value] of Object.entries(message || {})) {
     if (MEDIA_KEYS.includes(key)) return { type: key.replace('Message', ''), value };
@@ -33,8 +43,9 @@ function getMedia(message) {
 }
 
 function getViewOnceMedia(message) {
-  const unwrapped = unwrapViewOnce(message);
-  if (!unwrapped) return null;
+  if (!containsViewOnce(message)) return null;
+  const normalized = normalizeMessageContent(message) || message;
+  const unwrapped = unwrapViewOnce(normalized) || normalized;
   return getMedia(normalizeMessageContent(unwrapped) || unwrapped);
 }
 
