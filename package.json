@@ -17,7 +17,9 @@
     "express": "^5.2.1",
     "pg": "^8.11.5",
     "pino": "^9.0.0",
-    "qrcode-terminal": "^0.12.0"
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.22.0"
   },
   "allowScripts": {
     "@whiskeysockets/baileys@6.7.24": true,

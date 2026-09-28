@@ -7,6 +7,7 @@ const {
   userPart,
 } = require('../lib/groupUtils');
 const { resetWarnings } = require('../lib/warnStore');
+const dashboardEvents = require('../dashboardEvents');
 
 module.exports = {
   command: 'delwarn',
@@ -61,6 +62,7 @@ module.exports = {
       }
 
       await resetWarnings(from, targetParticipant.jid);
+      dashboardEvents.emit('warnings');
 
       await sock.sendMessage(from, {
         text: `✅ Warnings cleared for @${userPart(targetParticipant.id)}.`,

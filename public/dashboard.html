@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orefyspace Bot Dashboard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #121a2e;
+      --panel-soft: #18233d;
+      --text: #edf2ff;
+      --muted: #9eabc7;
+      --border: #2a385a;
+      --green: #42d392;
+      --amber: #f2c14e;
+      --red: #ff6b7a;
+      --blue: #75a7ff;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top right, #17244a 0, var(--bg) 42%);
+      color: var(--text);
+      font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    .shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 56px; }
+    header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: clamp(28px, 5vw, 46px); letter-spacing: -0.04em; }
+    h2 { font-size: 18px; }
+    .eyebrow { color: var(--blue); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    .muted { color: var(--muted); }
+    .refresh { color: var(--muted); font-size: 13px; text-align: right; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 16px; }
+    .card, .panel { background: rgba(18, 26, 46, .88); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 14px 42px rgba(0, 0, 0, .18); }
+    .card { padding: 20px; }
+    .card-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .card-value { font-size: 25px; font-weight: 750; margin-top: 8px; }
+    .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 7px 2px 0; background: var(--amber); }
+    .status-dot.connected { background: var(--green); box-shadow: 0 0 14px rgba(66, 211, 146, .7); }
+    .status-dot.error { background: var(--red); }
+    .panel { overflow: hidden; }
+    .panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 20px; border-bottom: 1px solid var(--border); }
+    .panel-body { padding: 20px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 680px; }
+    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid rgba(42, 56, 90, .7); vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
+    td { color: #dfe7fb; }
+    tr:last-child td { border-bottom: 0; }
+    code { color: #c8d8ff; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+    .badge { display: inline-block; padding: 4px 9px; border-radius: 999px; background: rgba(242, 193, 78, .13); color: var(--amber); font-weight: 700; }
+    .empty { color: var(--muted); padding: 10px 0; }
+    .error { color: var(--red); }
+    @media (max-width: 820px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .refresh { text-align: left; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 480px) {
+      .shell { width: min(100% - 20px, 1120px); padding-top: 24px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">Orefyspace WhatsApp Bot</div>
+        <h1>Bot dashboard</h1>
+        <p class="muted">A live view of runtime health and moderation warnings.</p>
+      </div>
+      <div class="refresh">Last updated<br><strong id="updated">—</strong></div>
+    </header>
+
+    <section class="grid" aria-label="Bot summary">
+      <article class="card"><div class="card-label">Connection</div><div class="card-value" id="connection"><span class="status-dot"></span>Loading</div></article>
+      <article class="card"><div class="card-label">Uptime</div><div class="card-value" id="uptime">—</div></article>
+      <article class="card"><div class="card-label">Memory</div><div class="card-value" id="memory">—</div></article>
+      <article class="card"><div class="card-label">Active warnings</div><div class="card-value" id="warning-total">—</div></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><h2>Active warnings</h2><p class="muted">Warning records with a count above zero.</p></div>
+        <span class="muted" id="warning-groups">— groups</span>
+      </div>
+      <div class="panel-body">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Group</th><th>User</th><th>Warnings</th><th>Reasons</th><th>Updated</th></tr></thead>
+            <tbody id="warnings"><tr><td colspan="5" class="empty">Loading warnings…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const formatUptime = (seconds) => {
+      const value = Math.max(0, Math.floor(Number(seconds) || 0));
+      const days = Math.floor(value / 86400);
+      const hours = Math.floor((value % 86400) / 3600);
+      const minutes = Math.floor((value % 3600) / 60);
+      const secs = value % 60;
+      return `${days}d ${hours}h ${minutes}m ${secs}s`;
+    };
+    const formatDate = (value) => value ? new Date(value).toLocaleString() : '—';
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+
+    function renderStatus(status) {
+      const connected = status.whatsappConnected;
+      $('connection').innerHTML = `<span class="status-dot ${connected ? 'connected' : 'error'}"></span>${escapeHtml(status.connectionState)}`;
+      $('uptime').textContent = formatUptime(status.uptimeSeconds);
+      $('memory').textContent = `${escapeHtml(status.memoryMb)} MB`;
+      $('updated').textContent = new Date().toLocaleTimeString();
+    }
+
+    function renderWarnings(warningData) {
+      $('warning-total').textContent = warningData.total;
+      $('warning-groups').textContent = `${warningData.warnings.length} group${warningData.warnings.length === 1 ? '' : 's'}`;
+      const rows = warningData.warnings.map((warning) => {
+        const reasons = Array.isArray(warning.reasons) && warning.reasons.length
+          ? warning.reasons.map(escapeHtml).join('<br>')
+          : '<span class="muted">No reason recorded</span>';
+        return `<tr><td><code>${escapeHtml(warning.group_jid)}</code></td><td><code>${escapeHtml(warning.user_jid)}</code></td><td><span class="badge">${escapeHtml(warning.count)}</span></td><td>${reasons}</td><td>${escapeHtml(formatDate(warning.updated_at))}</td></tr>`;
+      }).join('');
+      $('warnings').innerHTML = rows || '<tr><td colspan="5" class="empty">No active warnings.</td></tr>';
+    }
+
+    async function loadDashboard() {
+      try {
+        const [statusResponse, warningsResponse] = await Promise.all([
+          fetch('/dashboard/api/status'),
+          fetch('/dashboard/api/warnings')
+        ]);
+        if (!statusResponse.ok || !warningsResponse.ok) throw new Error('Dashboard API request failed');
+        renderStatus(await statusResponse.json());
+        renderWarnings(await warningsResponse.json());
+      } catch (error) {
+        $('connection').innerHTML = '<span class="status-dot error"></span>Unavailable';
+        $('warnings').innerHTML = `<tr><td colspan="5" class="empty error">${escapeHtml(error.message)}</td></tr>`;
+      }
+    }
+
+    let socket;
+    function connectRealtime() {
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      socket = new WebSocket(`${protocol}://${location.host}/dashboard/ws`);
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'status') renderStatus(message.data);
+          if (message.type === 'warnings') renderWarnings(message.data);
+        } catch { /* Ignore malformed event payloads and await the next update. */ }
+      };
+      socket.onclose = () => setTimeout(connectRealtime, 3000);
+    }
+
+    loadDashboard();
+    connectRealtime();
+    setInterval(() => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) loadDashboard();
+    }, 30000);
+  </script>
+</body>
+</html>

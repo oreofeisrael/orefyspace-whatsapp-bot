@@ -47,4 +47,21 @@ async function resetWarnings(groupJid, userJid) {
   );
 }
 
-module.exports = { ensureWarnTable, getWarning, addWarning, resetWarnings };
+async function listActiveWarnings() {
+  await ensureWarnTable();
+  const res = await pool.query(
+    `SELECT group_jid, user_jid, count, reasons, updated_at
+     FROM warnings
+     WHERE count > 0
+     ORDER BY updated_at DESC`
+  );
+  return res.rows;
+}
+
+module.exports = {
+  ensureWarnTable,
+  getWarning,
+  addWarning,
+  resetWarnings,
+  listActiveWarnings,
+};

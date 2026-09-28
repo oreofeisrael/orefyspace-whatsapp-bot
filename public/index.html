@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orefyspace WhatsApp Bot</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#121a2e; --soft:#18233d; --text:#edf2ff; --muted:#a7b4d0; --border:#2a385a; --blue:#75a7ff; --green:#42d392; --amber:#f2c14e; --red:#ff6b7a; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; color:var(--text); background:radial-gradient(circle at top right,#17244a 0,var(--bg) 44%); font:15px/1.55 Inter,ui-sans-serif,system-ui,sans-serif; }
+    .shell { width:min(1040px,calc(100% - 32px)); margin:0 auto; padding:56px 0 72px; }
+    .hero { max-width:700px; margin-bottom:30px; }
+    .eyebrow { color:var(--blue); font-size:12px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+    h1 { margin:10px 0 12px; font-size:clamp(36px,7vw,68px); line-height:1; letter-spacing:-.055em; }
+    h2 { margin:0 0 8px; font-size:21px; }
+    p { margin:0; } .muted { color:var(--muted); }
+    .hero p { font-size:18px; color:var(--muted); }
+    .actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:24px; }
+    a, button { border:0; border-radius:10px; padding:11px 16px; color:var(--text); background:var(--soft); font:inherit; font-weight:700; text-decoration:none; cursor:pointer; }
+    a.primary, button.primary { background:var(--blue); color:#071026; }
+    .layout { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .panel { padding:24px; background:rgba(18,26,46,.9); border:1px solid var(--border); border-radius:18px; box-shadow:0 14px 42px rgba(0,0,0,.18); }
+    .panel-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:18px; }
+    .pill { display:inline-flex; align-items:center; gap:7px; padding:5px 9px; border-radius:999px; background:rgba(242,193,78,.12); color:var(--amber); font-size:12px; font-weight:800; white-space:nowrap; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--amber); } .dot.green { background:var(--green); box-shadow:0 0 12px rgba(66,211,146,.7); } .dot.red { background:var(--red); }
+    .qr-box { min-height:300px; display:grid; place-items:center; padding:18px; border:1px dashed var(--border); border-radius:14px; background:#0d1427; }
+    #qr { max-width:260px; width:100%; image-rendering:auto; border-radius:8px; background:white; padding:10px; }
+    .placeholder { max-width:280px; text-align:center; color:var(--muted); }
+    form { display:grid; gap:12px; margin-top:18px; }
+    label { color:var(--muted); font-size:13px; font-weight:650; }
+    input { width:100%; margin-top:6px; border:1px solid var(--border); border-radius:9px; padding:11px 12px; color:var(--text); background:#0d1427; font:inherit; }
+    .notice { min-height:24px; color:var(--muted); font-size:13px; }
+    .notice.error { color:var(--red); } .notice.success { color:var(--green); }
+    ol { padding-left:22px; color:var(--muted); } li { margin:9px 0; } strong { color:var(--text); }
+    @media (max-width:760px) { .layout { grid-template-columns:1fr; } .shell { padding-top:34px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="eyebrow">Orefyspace WhatsApp Bot</div>
+      <h1>Connect your WhatsApp.</h1>
+      <p>Pair the bot with WhatsApp using a QR code or a phone-number pairing code, then manage the bot from the dashboard.</p>
+      <div class="actions"><a class="primary" href="/dashboard">Open dashboard</a><a href="#instructions">How it works</a></div>
+    </section>
+
+    <section class="layout" aria-label="Pairing options">
+      <article class="panel">
+        <div class="panel-head"><div><h2>Scan QR code</h2><p class="muted">Open WhatsApp → Linked devices → Link a device.</p></div><span class="pill"><span class="dot" id="qr-dot"></span><span id="qr-state">Checking</span></span></div>
+        <div class="qr-box"><img id="qr" alt="WhatsApp pairing QR code" hidden><div class="placeholder" id="qr-placeholder">Waiting for the bot to provide a QR code…</div></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>Use pairing code</h2><p class="muted">Enter the phone number that will host the WhatsApp bot.</p></div></div>
+        <form id="pair-form">
+          <label>Phone number with country code<input id="phone" name="phone" type="tel" placeholder="2348012345678" required></label>
+          <button class="primary" type="submit">Generate pairing code</button>
+          <div class="notice" id="pair-result" role="status"></div>
+        </form>
+        <p class="muted" style="margin-top:20px;font-size:13px">The returned code is temporary. Enter it in WhatsApp under Linked devices → Link with phone number.</p>
+      </article>
+    </section>
+
+    <section class="panel" id="instructions" style="margin-top:16px">
+      <h2>How it works</h2>
+      <ol>
+        <li>Use either option above to link the WhatsApp account that should run the bot.</li>
+        <li>Keep the linked phone online and check that the bot connects successfully.</li>
+        <li>Use the dashboard to monitor connection health and active warnings.</li>
+      </ol>
+      <p class="muted" style="font-size:13px">Pairing is currently open on this page as requested. Restrict these controls before sharing the URL widely.</p>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const setState = (text, kind) => { $('qr-state').textContent = text; $('qr-dot').className = `dot ${kind || ''}`; };
+    async function refreshPairing() {
+      try {
+        const response = await fetch('/api/pairing/status');
+        const state = await response.json();
+        if (state.qrDataUrl) { $('qr').src = state.qrDataUrl; $('qr').hidden = false; $('qr-placeholder').hidden = true; setState('Ready to scan', 'green'); }
+        else if (state.whatsappConnected) { $('qr').hidden = true; $('qr-placeholder').hidden = false; $('qr-placeholder').textContent = 'WhatsApp is already connected.'; setState('Connected', 'green'); }
+        else { setState(state.connectionState || 'Waiting'); }
+      } catch { setState('Unavailable', 'red'); }
+    }
+    $('pair-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const result = $('pair-result'); result.className = 'notice'; result.textContent = 'Requesting code…';
+      try {
+        const response = await fetch('/api/pairing/code', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ phoneNumber:$('phone').value }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Unable to generate pairing code.');
+        result.className = 'notice success'; result.textContent = `Pairing code: ${data.code}`;
+      } catch (error) { result.className = 'notice error'; result.textContent = error.message; }
+    });
+    refreshPairing(); setInterval(refreshPairing, 3000);
+  </script>
+</body>
+</html>

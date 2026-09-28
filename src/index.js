@@ -7,7 +7,11 @@ const {
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
+const qrcodeImage = require('qrcode');
 const express = require('express');
+const path = require('path');
+const { createDashboardRouter, attachDashboardWebSocket } = require('./dashboard');
+const dashboardEvents = require('./dashboardEvents');
 const { useDatabaseBackedAuthState } = require('./auth/folderBackupAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
 const { isGroup, candidateIds, participantMatches, isAdmin, containsLink, userPart } = require('./lib/groupUtils');
@@ -26,6 +30,7 @@ process.on('unhandledRejection', (reason) => {
 const PREFIX = process.env.PREFIX || '.';
 const BOT_NAME = process.env.BOT_NAME || 'Orefyspace WhatsApp Bot';
 const USE_PAIRING_CODE = process.env.USE_PAIRING_CODE === 'true';
+const PAIRING_COOLDOWN_MS = 60 * 1000;
 
 const DISOBEDIENCE_QUOTES = [
   "Discipline is choosing between what you want now and what you want most.",
@@ -45,6 +50,32 @@ console.log(`📦 Loaded ${plugins.size} command(s)`);
 
 let sock = null;
 let isStarting = false;
+let connectionState = 'starting';
+let lastConnectedAt = null;
+let lastDisconnectAt = null;
+let isRegistered = null;
+let latestQrDataUrl = null;
+let pairingCodeLastRequestedAt = 0;
+let pairingCodeInProgress = false;
+
+function getBotStatus() {
+  const memory = process.memoryUsage();
+  return {
+    botName: BOT_NAME,
+    connectionState,
+    whatsappConnected: connectionState === 'connected',
+    uptimeSeconds: process.uptime(),
+    memoryMb: Number((memory.rss / 1024 / 1024).toFixed(1)),
+    lastConnectedAt,
+    lastDisconnectAt,
+    nodeVersion: process.version,
+  };
+}
+
+function publishStatus() {
+  dashboardEvents.emit('status');
+  dashboardEvents.emit('pairing');
+}
 
 // -----------------------------
 // Anti-link escalation ladder:
@@ -145,11 +176,15 @@ async function start() {
     return;
   }
   isStarting = true;
+  connectionState = 'starting';
+  latestQrDataUrl = null;
+  publishStatus();
 
   console.log(`🚀 Starting ${BOT_NAME}...`);
 
   try {
     const { state, saveCreds } = await useDatabaseBackedAuthState();
+    isRegistered = Boolean(state.creds.registered);
     const { version } = await fetchLatestBaileysVersion();
 
     sock = makeWASocket({
@@ -173,15 +208,28 @@ async function start() {
     sock.ev.on('connection.update', (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      if (qr && !USE_PAIRING_CODE) {
-        console.log('📱 Scan this QR code with WhatsApp:');
-        qrcode.generate(qr, { small: true });
+      if (qr) {
+        if (!USE_PAIRING_CODE) {
+          console.log('📱 Scan this QR code with WhatsApp:');
+          qrcode.generate(qr, { small: true });
+        }
+        qrcodeImage.toDataURL(qr, { width: 320, margin: 1 })
+          .then((dataUrl) => {
+            latestQrDataUrl = dataUrl;
+            publishStatus();
+          })
+          .catch((error) => console.error('❌ QR image error:', error));
       }
 
       if (connection === 'close') {
         const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         console.log('Connection closed. Reconnecting:', shouldReconnect, '| code:', statusCode);
+
+        connectionState = shouldReconnect ? 'reconnecting' : 'logged_out';
+        lastDisconnectAt = new Date().toISOString();
+        latestQrDataUrl = null;
+        publishStatus();
 
         isStarting = false;
 
@@ -191,6 +239,11 @@ async function start() {
           console.log('Logged out. Delete the auth_session folder and the database backup, then re-link.');
         }
       } else if (connection === 'open') {
+        connectionState = 'connected';
+        lastConnectedAt = new Date().toISOString();
+        isRegistered = true;
+        latestQrDataUrl = null;
+        publishStatus();
         console.log(`✅ ${BOT_NAME} connected to WhatsApp`);
       }
     });
@@ -263,13 +316,65 @@ async function start() {
 
   } catch (err) {
     console.error('🔥 Error inside start():', err);
+    connectionState = 'error';
+    publishStatus();
     isStarting = false;
   }
 }
 
 const app = express();
-app.get('/', (req, res) => res.send(`${BOT_NAME} is alive`));
+app.use(express.json({ limit: '8kb' }));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+
+app.get('/api/pairing/status', (req, res) => {
+  res.json({
+    ...getBotStatus(),
+    isRegistered,
+    qrDataUrl: latestQrDataUrl,
+  });
+});
+
+app.post('/api/pairing/code', async (req, res) => {
+  const phoneNumber = String(req.body?.phoneNumber || '').replace(/\D/g, '');
+
+  if (!/^\d{8,15}$/.test(phoneNumber)) {
+    res.status(400).json({ error: 'Enter a valid phone number with country code.' });
+    return;
+  }
+  if (!sock || isRegistered === null) {
+    res.status(503).json({ error: 'The WhatsApp socket is not ready yet. Try again shortly.' });
+    return;
+  }
+  if (isRegistered) {
+    res.status(409).json({ error: 'This bot is already linked. Log out or reset the session before pairing again.' });
+    return;
+  }
+  if (pairingCodeInProgress) {
+    res.status(429).json({ error: 'A pairing-code request is already in progress.' });
+    return;
+  }
+  const remaining = PAIRING_COOLDOWN_MS - (Date.now() - pairingCodeLastRequestedAt);
+  if (remaining > 0) {
+    res.status(429).json({ error: `Try again in ${Math.ceil(remaining / 1000)} seconds.` });
+    return;
+  }
+
+  pairingCodeInProgress = true;
+  pairingCodeLastRequestedAt = Date.now();
+  try {
+    const code = await sock.requestPairingCode(phoneNumber);
+    res.json({ code });
+  } catch (error) {
+    console.error('❌ Pairing-code request error:', error);
+    res.status(500).json({ error: 'Unable to generate a pairing code right now.' });
+  } finally {
+    pairingCodeInProgress = false;
+  }
+});
+
+app.use('/dashboard', createDashboardRouter({ getStatus: getBotStatus }));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🌐 Health check server running on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`🌐 Health check server running on port ${PORT}`));
+attachDashboardWebSocket(server, { getStatus: getBotStatus });
 
 start();
