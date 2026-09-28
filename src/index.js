@@ -295,7 +295,7 @@ async function startSession(account) {
 
         if (!msg.key.fromMe && getViewOnceMedia(msg.message)) {
           try {
-            if (await getAntiViewOnceEnabled(session.accountId, msg.key.remoteJid)) {
+            if (await getAntiViewOnceEnabled(session.accountId)) {
               const recovered = await resendViewOnce({
                 sock,
                 msg,

@@ -13,27 +13,37 @@ async function ensureTable() {
         PRIMARY KEY (account_id, chat_jid)
       )
     `);
+    await pool.query(`
+      INSERT INTO anti_view_once_settings (account_id, chat_jid, enabled, updated_at)
+      SELECT account_id, '*', BOOL_OR(enabled), NOW()
+      FROM anti_view_once_settings
+      WHERE chat_jid <> '*'
+      GROUP BY account_id
+      ON CONFLICT (account_id, chat_jid) DO NOTHING
+    `);
   })();
   return ensurePromise;
 }
 
-async function getEnabled(accountId, chatJid) {
+const GLOBAL_CHAT_KEY = '*';
+
+async function getEnabled(accountId) {
   await ensureTable();
   const result = await pool.query(
     'SELECT enabled FROM anti_view_once_settings WHERE account_id = $1 AND chat_jid = $2',
-    [accountId, chatJid]
+    [accountId, GLOBAL_CHAT_KEY]
   );
   return Boolean(result.rows[0]?.enabled);
 }
 
-async function setEnabled(accountId, chatJid, enabled) {
+async function setEnabled(accountId, enabled) {
   await ensureTable();
   await pool.query(
     `INSERT INTO anti_view_once_settings (account_id, chat_jid, enabled, updated_at)
      VALUES ($1, $2, $3, NOW())
      ON CONFLICT (account_id, chat_jid)
      DO UPDATE SET enabled = $3, updated_at = NOW()`,
-    [accountId, chatJid, enabled]
+    [accountId, GLOBAL_CHAT_KEY, enabled]
   );
 }
 

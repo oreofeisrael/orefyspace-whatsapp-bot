@@ -36,7 +36,7 @@ module.exports = {
             `│  Status: ${enabled ? '🟢 ON' : '🔴 OFF'}\n` +
             '│\n' +
             '│  When enabled, view-once media is\n' +
-            '│  automatically resent as normal media.\n' +
+            '│  automatically resent in every chat.\n' +
             '│\n' +
             '│  Usage: `.antivv on` / `.antivv off`\n' +
             '│\n' +
@@ -46,14 +46,14 @@ module.exports = {
       }
 
       if (option === 'on') {
-        await setEnabled(accountId, from, true);
-        await sock.sendMessage(from, { text: '🟢 Anti View Once enabled for this chat.' });
+        await setEnabled(accountId, true);
+        await sock.sendMessage(from, { text: '🟢 Anti View Once enabled globally for this WhatsApp account.' });
         return;
       }
 
       if (option === 'off') {
-        await setEnabled(accountId, from, false);
-        await sock.sendMessage(from, { text: '🔴 Anti View Once disabled for this chat.' });
+        await setEnabled(accountId, false);
+        await sock.sendMessage(from, { text: '🔴 Anti View Once disabled globally for this WhatsApp account.' });
         return;
       }
 
