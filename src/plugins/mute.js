@@ -14,7 +14,7 @@ module.exports = {
   command: 'mute',
   description: 'Temporarily prevent a member from messaging the group',
 
-  execute: async ({ sock, msg, from, args }) => {
+  execute: async ({ sock, msg, from, args, accountId }) => {
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -104,7 +104,7 @@ module.exports = {
       }
 
       const mutedUntil = Date.now() + durationMs;
-      await setMute(from, targetParticipant.jid, mutedUntil);
+      await setMute(accountId, from, targetParticipant.jid, mutedUntil);
 
       await sock.sendMessage(from, {
         text:

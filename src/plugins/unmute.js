@@ -12,7 +12,7 @@ module.exports = {
   command: 'unmute',
   description: 'Remove a mute from a group member',
 
-  execute: async ({ sock, msg, from }) => {
+  execute: async ({ sock, msg, from, accountId }) => {
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -58,7 +58,7 @@ module.exports = {
         return;
       }
 
-      await clearMute(from, targetParticipant.jid);
+      await clearMute(accountId, from, targetParticipant.jid);
 
       await sock.sendMessage(from, {
         text: `✅ @${userPart(targetParticipant.id)} has been unmuted.`,

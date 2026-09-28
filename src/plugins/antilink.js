@@ -5,7 +5,7 @@ module.exports = {
   command: 'antilink',
   description: 'Toggle automatic link detection and escalating punishment',
 
-  execute: async ({ sock, msg, from, args }) => {
+  execute: async ({ sock, msg, from, args, accountId }) => {
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -34,7 +34,7 @@ module.exports = {
       const rawArgs = (Array.isArray(args) ? args.join(' ') : (args || '')).trim().toLowerCase();
 
       if (!rawArgs) {
-        const settings = await getSettings(from);
+        const settings = await getSettings(accountId, from);
         await sock.sendMessage(from, {
           text:
             '╭───〔 ✦ *ANTILINK* ✦ 〕───╮\n' +
@@ -55,13 +55,13 @@ module.exports = {
       }
 
       if (rawArgs === 'on') {
-        await setEnabled(from, true);
+        await setEnabled(accountId, from, true);
         await sock.sendMessage(from, { text: '🟢 Anti-link enabled for this group.' });
         return;
       }
 
       if (rawArgs === 'off') {
-        await setEnabled(from, false);
+        await setEnabled(accountId, from, false);
         await sock.sendMessage(from, { text: '🔴 Anti-link disabled for this group.' });
         return;
       }

@@ -13,7 +13,7 @@ module.exports = {
   command: 'delwarn',
   description: "Clear a member's warnings",
 
-  execute: async ({ sock, msg, from }) => {
+  execute: async ({ sock, msg, from, accountId }) => {
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -61,7 +61,7 @@ module.exports = {
         return;
       }
 
-      await resetWarnings(from, targetParticipant.jid);
+      await resetWarnings(accountId, from, targetParticipant.jid);
       dashboardEvents.emit('warnings');
 
       await sock.sendMessage(from, {

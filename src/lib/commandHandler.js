@@ -29,7 +29,7 @@ function getMessageText(msg) {
   );
 }
 
-async function handleMessage(sock, msg, plugins, prefix) {
+async function handleMessage(sock, msg, plugins, prefix, accountId) {
   const text = getMessageText(msg).trim();
   if (!text.startsWith(prefix)) return;
 
@@ -40,7 +40,7 @@ async function handleMessage(sock, msg, plugins, prefix) {
   if (!plugin) return;
 
   const from = msg.key.remoteJid;
-  await plugin.execute({ sock, msg, args, from, text });
+  await plugin.execute({ sock, msg, args, from, text, accountId });
 }
 
 module.exports = { loadPlugins, handleMessage };

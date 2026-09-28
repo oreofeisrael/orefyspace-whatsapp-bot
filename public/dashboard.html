@@ -46,6 +46,10 @@
     .panel { overflow: hidden; }
     .panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 20px; border-bottom: 1px solid var(--border); }
     .panel-body { padding: 20px; }
+    .account-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .account-card { padding: 15px; border: 1px solid var(--border); border-radius: 12px; background: rgba(13, 20, 39, .7); }
+    .account-card strong { display: block; margin-bottom: 4px; }
+    .account-card code { display: block; overflow: hidden; text-overflow: ellipsis; }
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; min-width: 680px; }
     th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid rgba(42, 56, 90, .7); vertical-align: top; }
@@ -85,6 +89,11 @@
       <article class="card"><div class="card-label">Active warnings</div><div class="card-value" id="warning-total">—</div></article>
     </section>
 
+    <section class="panel" style="margin-bottom: 16px">
+      <div class="panel-head"><div><h2>WhatsApp accounts</h2><p class="muted">Each account runs in its own session.</p></div><span class="muted" id="account-count">— accounts</span></div>
+      <div class="panel-body"><div class="account-grid" id="accounts"><div class="empty">Loading accounts…</div></div></div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <div><h2>Active warnings</h2><p class="muted">Warning records with a count above zero.</p></div>
@@ -93,8 +102,8 @@
       <div class="panel-body">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Group</th><th>User</th><th>Warnings</th><th>Reasons</th><th>Updated</th></tr></thead>
-            <tbody id="warnings"><tr><td colspan="5" class="empty">Loading warnings…</td></tr></tbody>
+            <thead><tr><th>Account</th><th>Group</th><th>User</th><th>Warnings</th><th>Reasons</th><th>Updated</th></tr></thead>
+            <tbody id="warnings"><tr><td colspan="6" class="empty">Loading warnings…</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -120,6 +129,12 @@
       $('uptime').textContent = formatUptime(status.uptimeSeconds);
       $('memory').textContent = `${escapeHtml(status.memoryMb)} MB`;
       $('updated').textContent = new Date().toLocaleTimeString();
+      const accounts = status.accounts || [];
+      $('account-count').textContent = `${accounts.length} account${accounts.length === 1 ? '' : 's'}`;
+      $('accounts').innerHTML = accounts.map((account) => {
+        const connected = account.whatsappConnected;
+        return `<article class="account-card"><strong><span class="status-dot ${connected ? 'connected' : account.connectionState === 'error' ? 'error' : ''}"></span>${escapeHtml(account.label)}</strong><code>${escapeHtml(account.accountId)}</code><span class="muted">${escapeHtml(account.connectionState)}</span></article>`;
+      }).join('') || '<div class="empty">No WhatsApp accounts.</div>';
     }
 
     function renderWarnings(warningData) {
@@ -129,9 +144,9 @@
         const reasons = Array.isArray(warning.reasons) && warning.reasons.length
           ? warning.reasons.map(escapeHtml).join('<br>')
           : '<span class="muted">No reason recorded</span>';
-        return `<tr><td><code>${escapeHtml(warning.group_jid)}</code></td><td><code>${escapeHtml(warning.user_jid)}</code></td><td><span class="badge">${escapeHtml(warning.count)}</span></td><td>${reasons}</td><td>${escapeHtml(formatDate(warning.updated_at))}</td></tr>`;
+        return `<tr><td><code>${escapeHtml(warning.account_id || 'primary')}</code></td><td><code>${escapeHtml(warning.group_jid)}</code></td><td><code>${escapeHtml(warning.user_jid)}</code></td><td><span class="badge">${escapeHtml(warning.count)}</span></td><td>${reasons}</td><td>${escapeHtml(formatDate(warning.updated_at))}</td></tr>`;
       }).join('');
-      $('warnings').innerHTML = rows || '<tr><td colspan="5" class="empty">No active warnings.</td></tr>';
+      $('warnings').innerHTML = rows || '<tr><td colspan="6" class="empty">No active warnings.</td></tr>';
     }
 
     async function loadDashboard() {
@@ -145,7 +160,7 @@
         renderWarnings(await warningsResponse.json());
       } catch (error) {
         $('connection').innerHTML = '<span class="status-dot error"></span>Unavailable';
-        $('warnings').innerHTML = `<tr><td colspan="5" class="empty error">${escapeHtml(error.message)}</td></tr>`;
+        $('warnings').innerHTML = `<tr><td colspan="6" class="empty error">${escapeHtml(error.message)}</td></tr>`;
       }
     }
 

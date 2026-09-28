@@ -50,7 +50,7 @@ module.exports = {
       }
 
       const targetJid = `${number}@s.whatsapp.net`;
-      const removed = await removeBan(from, targetJid);
+      const removed = await removeBan(accountId, from, targetJid);
 
       if (!removed) {
         await sock.sendMessage(from, {

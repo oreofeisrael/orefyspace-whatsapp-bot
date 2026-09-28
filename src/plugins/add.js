@@ -125,7 +125,7 @@ module.exports = {
       // -----------------------------
       // Check ban list
       // -----------------------------
-      const banRecord = await isBanned(from, targetJid);
+      const banRecord = await isBanned(accountId, from, targetJid);
       if (banRecord) {
         await sock.sendMessage(from, {
           text:

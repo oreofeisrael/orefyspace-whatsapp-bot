@@ -15,7 +15,7 @@ module.exports = {
   command: 'warn',
   description: 'Warn a group member (auto-kick at warning limit)',
 
-  execute: async ({ sock, msg, from, args }) => {
+  execute: async ({ sock, msg, from, args, accountId }) => {
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -93,7 +93,7 @@ module.exports = {
       // -----------------------------
       // Store warning (canonical key = phone-based jid, stable across sessions)
       // -----------------------------
-      const { count } = await addWarning(from, targetParticipant.jid, reason);
+      const { count } = await addWarning(accountId, from, targetParticipant.jid, reason);
       dashboardEvents.emit('warnings');
 
       await sock.sendMessage(from, {
@@ -125,7 +125,7 @@ module.exports = {
         }
 
         await sock.groupParticipantsUpdate(from, [targetParticipant.id], 'remove');
-        await resetWarnings(from, targetParticipant.jid);
+        await resetWarnings(accountId, from, targetParticipant.jid);
         dashboardEvents.emit('warnings');
 
         await sock.sendMessage(from, {

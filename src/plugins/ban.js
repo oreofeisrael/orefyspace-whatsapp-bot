@@ -12,7 +12,7 @@ module.exports = {
   command: 'ban',
   description: 'Remove a member and prevent them from being re-added',
 
-  execute: async ({ sock, msg, from, args }) => {
+  execute: async ({ sock, msg, from, args, accountId }) => {
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -91,7 +91,7 @@ module.exports = {
 
       // Record the ban BEFORE removing, so if the kick fails partway
       // we still have the ban recorded (safer than the reverse order).
-      await addBan(from, targetParticipant.jid, reason);
+      await addBan(accountId, from, targetParticipant.jid, reason);
 
       await sock.groupParticipantsUpdate(from, [targetParticipant.id], 'remove');
 

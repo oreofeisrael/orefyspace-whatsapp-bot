@@ -13,7 +13,7 @@ module.exports = {
   command: 'warnings',
   description: "Check a member's warning count",
 
-  execute: async ({ sock, msg, from }) => {
+  execute: async ({ sock, msg, from, accountId }) => {
     if (!isGroup(from)) {
       await sock.sendMessage(from, {
         text: '❌ This command can only be used inside a group.',
@@ -47,7 +47,7 @@ module.exports = {
         return;
       }
 
-      const { count, reasons } = await getWarning(from, targetParticipant.jid);
+      const { count, reasons } = await getWarning(accountId, from, targetParticipant.jid);
 
       const reasonList = reasons && reasons.length > 0
         ? reasons.map((r, i) => `   ${i + 1}. ${r}`).join('\n')
