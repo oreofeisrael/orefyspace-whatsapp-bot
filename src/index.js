@@ -3,6 +3,7 @@ const {
   default: makeWASocket,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  jidNormalizedUser,
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
@@ -300,6 +301,7 @@ async function startSession(account) {
                 sock,
                 msg,
                 from: msg.key.remoteJid,
+                destination: sock.user?.id ? jidNormalizedUser(sock.user.id) : undefined,
                 message: msg.message,
               });
               if (recovered) return;

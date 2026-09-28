@@ -64,7 +64,7 @@ function makeForwardableMessage(msg, message) {
   };
 }
 
-async function resendViewOnce({ sock, msg, from, message }) {
+async function resendViewOnce({ sock, msg, from, destination, message }) {
   const sourceMessage = message || getQuotedMessage(msg);
   if (!getViewOnceMedia(sourceMessage)) return false;
 
@@ -78,7 +78,7 @@ async function resendViewOnce({ sock, msg, from, message }) {
     // The normalized content no longer has the view-once wrapper. Clear the
     // legacy flag too for clients that include it on the media object.
     media.value.viewOnce = false;
-    await sock.sendMessage(from, {
+    await sock.sendMessage(destination || from, {
       forward: { ...source, message: normalized },
       force: true,
     });

@@ -47,7 +47,7 @@ module.exports = {
 
       if (option === 'on') {
         await setEnabled(accountId, true);
-        await sock.sendMessage(from, { text: '🟢 Anti View Once enabled globally for this WhatsApp account.' });
+        await sock.sendMessage(from, { text: '🟢 Anti View Once enabled globally. Recovered media will be sent to this WhatsApp account’s self-chat.' });
         return;
       }
 
