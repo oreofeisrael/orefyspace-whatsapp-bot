@@ -383,6 +383,16 @@ async function createAndStartAccount(label) {
   return sessionStatus(sessions.get(account.accountId));
 }
 
+async function waitForPairingSocket(accountId, timeoutMs = 15000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const session = sessions.get(accountId);
+    if (session?.sock && session.isRegistered === false) return session;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return sessions.get(accountId);
+}
+
 function challengeHash(code) {
   return crypto.createHash('sha256').update(String(code)).digest('hex');
 }
@@ -488,6 +498,30 @@ async function handlePairingCode(req, res, accountId) {
     return res.status(500).json({ error: 'Unable to generate a pairing code right now.' });
   }
 }
+
+app.post('/api/public/pairing-code', async (req, res) => {
+  try {
+    const phoneNumber = normalizePhone(req.body?.phoneNumber);
+    if (!/^\d{8,15}$/.test(phoneNumber)) {
+      return res.status(400).json({ error: 'Enter a valid phone number with country code.' });
+    }
+    const duplicate = [...sessions.values()].find((candidate) =>
+      candidate.isRegistered && candidate.phoneNumber === phoneNumber
+    );
+    if (duplicate) {
+      return res.status(409).json({ error: 'This WhatsApp number is already connected.' });
+    }
+    const account = await createAndStartAccount(req.body?.label || `WhatsApp ${phoneNumber.slice(-4)}`);
+    const session = await waitForPairingSocket(account.accountId);
+    if (!session?.sock || session.isRegistered !== false) {
+      return res.status(503).json({ accountId: account.accountId, error: 'The pairing session is still starting. Please try again shortly.' });
+    }
+    const code = await session.sock.requestPairingCode(phoneNumber);
+    res.status(201).json({ accountId: account.accountId, label: account.label, code });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
 
 app.post('/api/accounts/:accountId/pairing-code', (req, res) =>
   handlePairingCode(req, res, req.params.accountId)
