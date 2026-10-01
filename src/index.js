@@ -111,6 +111,7 @@ function getOrCreateSession(account) {
       lastDisconnectAt: null,
       startTimer: null,
       deleting: false,
+      pairingNotificationPending: false,
     };
     sessions.set(account.account_id, session);
   } else {
@@ -315,6 +316,12 @@ async function startSession(account) {
           session.qrDataUrl = null;
           publishStatus();
           console.log(`✅ ${BOT_NAME} account ${session.accountId} connected to WhatsApp`);
+          if (session.pairingNotificationPending) {
+            session.pairingNotificationPending = false;
+            sock.sendMessage(jidNormalizedUser(session.waJid), {
+              text: `✅ WhatsApp linked successfully to ${BOT_NAME}.\n\nYour pairing-code connection is active and ready to use. Send ${PREFIX}menu to see the available commands.`,
+            }).catch((error) => console.error(`⚠️ Could not send pairing confirmation for ${session.accountId}:`, error.message));
+          }
         }
       });
 
@@ -517,6 +524,7 @@ async function handlePairingCode(req, res, accountId) {
   pairingRequests.set(session.accountId, Date.now());
   try {
     const code = await session.sock.requestPairingCode(phoneNumber);
+    session.pairingNotificationPending = true;
     return res.json({ accountId: session.accountId, code });
   } catch (error) {
     console.error(`❌ Pairing-code request error for ${session.accountId}:`, error);
@@ -542,6 +550,7 @@ app.post('/api/public/pairing-code', async (req, res) => {
       return res.status(503).json({ accountId: account.accountId, error: 'The pairing session is still starting. Please try again shortly.' });
     }
     const code = await session.sock.requestPairingCode(phoneNumber);
+    session.pairingNotificationPending = true;
     res.status(201).json({ accountId: account.accountId, label: account.label, code });
   } catch (error) {
     res.status(400).json({ error: error.message });
