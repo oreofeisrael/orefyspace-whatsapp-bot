@@ -274,6 +274,20 @@ async function startSession(account) {
           session.sock = null;
           publishStatus();
           console.log(`Connection closed for ${session.accountId}. Reconnecting: ${shouldReconnect} | code: ${statusCode}`);
+          if (!session.deleting && statusCode === DisconnectReason.loggedOut && session.accountId !== 'primary') {
+            session.deleting = true;
+            deleteSessionAccount(session.accountId)
+              .then(() => {
+                sessions.delete(session.accountId);
+                deletionChallenges.delete(session.accountId);
+                publishStatus();
+                console.log(`🗑️ Removed logged-out WhatsApp profile ${session.accountId}`);
+              })
+              .catch((error) => {
+                session.deleting = false;
+                console.error(`❌ Could not remove logged-out profile ${session.accountId}:`, error.message);
+              });
+          }
           if (shouldReconnect && !session.startTimer) {
             session.startTimer = setTimeout(() => {
               session.startTimer = null;
