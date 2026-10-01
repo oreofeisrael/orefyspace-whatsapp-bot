@@ -74,9 +74,9 @@ function normalizePhone(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
-function isOwnerMessage(msg) {
+function isOwnerMessage(msg, session) {
   if (msg.key?.fromMe) return true;
-  const ownerNumber = normalizePhone(process.env.OWNER_NUMBER);
+  const ownerNumber = normalizePhone(session.phoneNumber || phoneFromJid(session.waJid));
   if (!ownerNumber) return false;
   const senderJid = isGroup(msg.key?.remoteJid)
     ? (msg.key?.participantPn || msg.key?.participant)
@@ -322,7 +322,7 @@ async function startSession(account) {
         if (type !== 'notify') return;
         const msg = messages[0];
         if (!msg?.message) return;
-        if (!isOwnerMessage(msg)) return;
+        if (!isOwnerMessage(msg, session)) return;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
         if (!msg.key.fromMe && getViewOnceMedia(msg.message)) {
