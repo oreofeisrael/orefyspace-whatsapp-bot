@@ -7,23 +7,28 @@ module.exports = {
   execute: async ({ sock, from, msg }) => {
     const now = new Date();
     const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    const date = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const date = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
 
     const uptimeSec = process.uptime();
     const h = Math.floor(uptimeSec / 3600);
     const m = Math.floor((uptimeSec % 3600) / 60);
     const uptime = `${h}h ${m}m`;
-
-    const senderName = msg.pushName || 'User';
+    const senderName = msg.pushName || 'Owner';
 
     const menuText = `
 ╭───〔 *${BOT_NAME.toUpperCase()}* 〕───╮
 │
-│  ➤ 👤 User      : *${senderName}*
+│  ➤ 👤 Owner     : *${senderName}*
 │  ➤ 📅 Date      : ${date}
 │  ➤ ⏰ Time      : ${time}
 │  ➤ ⚡ Uptime    : ${uptime}
 │  ➤ 🔧 Prefix    : [ ${PREFIX} ]
+│  ➤ 🔐 Access    : Owner only
 │
 ╰──────────────────────╯
 
@@ -31,28 +36,50 @@ module.exports = {
 │
 │  ▸ ${PREFIX}ping
 │  ▸ ${PREFIX}menu
-│  ▸ ${PREFIX}vv (reply to view-once media)
-│  ▸ ${PREFIX}antivv on/off
+│  ▸ ${PREFIX}info
+│  ▸ ${PREFIX}status
+│  ▸ ${PREFIX}owner
 │
 ╰──────────────────────╯
 
-╭──〔 ✦ *AI TOOLS* ✦ 〕──╮
+╭──〔 ✦ *MEDIA & AI* ✦ 〕──╮
 │
+│  ▸ ${PREFIX}vv (reply to view-once media)
+│  ▸ ${PREFIX}antivv on/off (save view-once media to self-chat)
 │  ▸ ${PREFIX}ai <text>
 │
 ╰──────────────────────╯
 
+╭──〔 ✦ *GROUP MODERATION* ✦ 〕──╮
+│
+│  ▸ ${PREFIX}antilink on/off
+│  ▸ ${PREFIX}warn @user [reason]
+│  ▸ ${PREFIX}warnings @user
+│  ▸ ${PREFIX}delwarn @user
+│  ▸ ${PREFIX}mute @user [duration]
+│  ▸ ${PREFIX}unmute @user
+│  ▸ ${PREFIX}ban @user
+│  ▸ ${PREFIX}unban @user
+│  ▸ ${PREFIX}kick @user
+│  ▸ ${PREFIX}add <number>
+│  ▸ ${PREFIX}groupmute
+│  ▸ ${PREFIX}groupunmute
+│
+╰────────────────────────────╯
+
 ╭──〔 ✦ *UPCOMING* ✦ 〕──╮
 │
-│  ▸ Group Moderation
-│  ▸ Sticker & Media Tools
-│  ▸ Multi-language Support
+│  ▸ Scheduled moderation rules
+│  ▸ Moderation analytics and reports
+│  ▸ Sticker and expanded media tools
+│  ▸ Multi-language command support
+│  ▸ Custom owner dashboard settings
 │
-╰──────────────────────╯
+╰────────────────────────────╯
 
      ✧═══════════════✧
       *${BOT_NAME}*
-      _Premium WhatsApp Automation_
+      _Private Owner-Controlled Automation_
      ✧═══════════════✧
 
       ✨ _Powered by Orefyspace_ ✨
