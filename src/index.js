@@ -11,6 +11,7 @@ const qrcodeTerminal = require('qrcode-terminal');
 const qrcodeImage = require('qrcode');
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const {
   createDashboardRouter,
   attachDashboardWebSocket,
@@ -22,6 +23,7 @@ const {
   createSessionAccount,
   updateSessionIdentity,
   useDatabaseBackedAuthState,
+  deleteSessionAccount,
 } = require('./auth/multiSessionAuthState');
 const { loadPlugins, handleMessage } = require('./lib/commandHandler');
 const {
@@ -46,6 +48,8 @@ const BOT_NAME = process.env.BOT_NAME || 'Orefyspace WhatsApp Bot';
 const USE_PAIRING_CODE = process.env.USE_PAIRING_CODE === 'true';
 const PAIRING_COOLDOWN_MS = 60 * 1000;
 const MAX_SESSIONS = Math.max(1, Number.parseInt(process.env.MAX_SESSIONS || '10', 10));
+const DELETION_CODE_TTL_MS = 10 * 60 * 1000;
+const DELETION_CODE_COOLDOWN_MS = 60 * 1000;
 
 const DISOBEDIENCE_QUOTES = [
   'Discipline is choosing between what you want now and what you want most.',
@@ -63,6 +67,7 @@ const plugins = loadPlugins();
 const sessions = new Map();
 const startLocks = new Map();
 const pairingRequests = new Map();
+const deletionChallenges = new Map();
 let latestBaileysVersion;
 
 function normalizePhone(value) {
@@ -95,6 +100,7 @@ function getOrCreateSession(account) {
       lastConnectedAt: null,
       lastDisconnectAt: null,
       startTimer: null,
+      deleting: false,
     };
     sessions.set(account.account_id, session);
   } else {
@@ -261,7 +267,7 @@ async function startSession(account) {
 
         if (connection === 'close') {
           const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+          const shouldReconnect = !session.deleting && statusCode !== DisconnectReason.loggedOut;
           session.connectionState = shouldReconnect ? 'reconnecting' : 'logged_out';
           session.lastDisconnectAt = new Date().toISOString();
           session.qrDataUrl = null;
@@ -377,6 +383,68 @@ async function createAndStartAccount(label) {
   return sessionStatus(sessions.get(account.accountId));
 }
 
+function challengeHash(code) {
+  return crypto.createHash('sha256').update(String(code)).digest('hex');
+}
+
+function secureCodeMatches(expectedHash, code) {
+  const actual = Buffer.from(challengeHash(code), 'hex');
+  const expected = Buffer.from(expectedHash, 'hex');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+async function requestDeletionCode(accountId) {
+  const session = sessions.get(accountId);
+  if (!session) throw new Error('Account not found.');
+  if (accountId === 'primary') throw new Error('The primary account cannot be deleted from the public website.');
+  if (!session.sock || session.connectionState !== 'connected' || !session.isRegistered) {
+    throw new Error('This WhatsApp account must be connected before requesting a deletion code.');
+  }
+  const existing = deletionChallenges.get(accountId);
+  if (existing && Date.now() - existing.requestedAt < DELETION_CODE_COOLDOWN_MS) {
+    throw new Error(`A code was already sent. Try again in ${Math.ceil((DELETION_CODE_COOLDOWN_MS - (Date.now() - existing.requestedAt)) / 1000)} seconds.`);
+  }
+  const code = String(crypto.randomInt(100000, 1000000));
+  const selfJid = session.sock.user?.id || session.waJid;
+  if (!selfJid) throw new Error('The account identity is not ready yet.');
+  await session.sock.sendMessage(jidNormalizedUser(selfJid), {
+    text: `🔐 Profile deletion code: ${code}\n\nThis code expires in 10 minutes. If you did not request this, ignore it.`,
+  });
+  deletionChallenges.set(accountId, {
+    hash: challengeHash(code),
+    requestedAt: Date.now(),
+    attempts: 0,
+  });
+}
+
+async function deleteAccountWithCode(accountId, code) {
+  const session = sessions.get(accountId);
+  if (!session) throw new Error('Account not found.');
+  if (accountId === 'primary') throw new Error('The primary account cannot be deleted from the public website.');
+  const challenge = deletionChallenges.get(accountId);
+  if (!challenge || Date.now() - challenge.requestedAt > DELETION_CODE_TTL_MS) {
+    deletionChallenges.delete(accountId);
+    throw new Error('The deletion code is missing or expired. Request a new code.');
+  }
+  challenge.attempts += 1;
+  if (challenge.attempts > 5) {
+    deletionChallenges.delete(accountId);
+    throw new Error('Too many incorrect attempts. Request a new code.');
+  }
+  if (!/^\d{6}$/.test(String(code || '')) || !secureCodeMatches(challenge.hash, code)) {
+    throw new Error('Incorrect deletion code.');
+  }
+  deletionChallenges.delete(accountId);
+  session.deleting = true;
+  if (session.startTimer) clearTimeout(session.startTimer);
+  if (session.sock?.logout) {
+    try { await session.sock.logout(); } catch (error) { console.warn(`⚠️ Logout during deletion failed for ${accountId}:`, error.message); }
+  }
+  await deleteSessionAccount(accountId);
+  sessions.delete(accountId);
+  publishStatus();
+}
+
 const app = express();
 app.use(express.json({ limit: '8kb' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
@@ -424,6 +492,24 @@ async function handlePairingCode(req, res, accountId) {
 app.post('/api/accounts/:accountId/pairing-code', (req, res) =>
   handlePairingCode(req, res, req.params.accountId)
 );
+
+app.post('/api/accounts/:accountId/deletion-code', async (req, res) => {
+  try {
+    await requestDeletionCode(req.params.accountId);
+    res.json({ message: 'A deletion code was sent to the WhatsApp account self-chat.' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/accounts/:accountId', async (req, res) => {
+  try {
+    await deleteAccountWithCode(req.params.accountId, req.body?.code);
+    res.json({ deleted: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
 
 // Backward-compatible route for the original primary-account homepage.
 app.post('/api/pairing/code', (req, res) => handlePairingCode(req, res, 'primary'));
