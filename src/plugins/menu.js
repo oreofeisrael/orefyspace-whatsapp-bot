@@ -28,7 +28,7 @@ module.exports = {
 │  ➤ ⏰ Time      : ${time}
 │  ➤ ⚡ Uptime    : ${uptime}
 │  ➤ 🔧 Prefix    : [ ${PREFIX} ]
-│  ➤ 🔐 Access    : Owner only
+│  ➤ 🔐 Access    : Owner + group admins
 │
 ╰──────────────────────╯
 

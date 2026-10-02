@@ -85,6 +85,26 @@ function isOwnerMessage(msg, session) {
   return phoneFromJid(senderJid) === ownerNumber;
 }
 
+async function canProcessMessage(sock, msg, session, text) {
+  if (isOwnerMessage(msg, session)) return true;
+  const remoteJid = msg.key?.remoteJid;
+  if (!isGroup(remoteJid) || !String(text || '').trim().startsWith(PREFIX)) return false;
+  try {
+    const metadata = await sock.groupMetadata(remoteJid);
+    const senderJid = msg.key?.participantPn || msg.key?.participant;
+    const sender = metadata.participants.find((participant) =>
+      participantMatches(participant, candidateIds(senderJid))
+    );
+    const bot = metadata.participants.find((participant) =>
+      participantMatches(participant, candidateIds(sock.user?.id, sock.user?.lid))
+    );
+    return isAdmin(sender) && isAdmin(bot);
+  } catch (error) {
+    console.error(`❌ Group admin authorization failed for ${session.accountId}:`, error.message);
+    return false;
+  }
+}
+
 function phoneFromJid(jid) {
   const match = String(jid || '').match(/^(\d+)(?::\d+)?@/);
   return match ? match[1] : null;
@@ -113,12 +133,16 @@ function getOrCreateSession(account) {
       startTimer: null,
       deleting: false,
       pairingNotificationPending: false,
+      messageStore: new Map(),
+      retryCache: new Map(),
     };
     sessions.set(account.account_id, session);
   } else {
     session.label = account.label;
     session.phoneNumber = account.phone_number || session.phoneNumber || null;
     session.waJid = account.wa_jid || session.waJid || null;
+    session.messageStore ||= new Map();
+    session.retryCache ||= new Map();
   }
   return session;
 }
@@ -250,6 +274,11 @@ async function startSession(account) {
         auth: state,
         logger: pino({ level: 'silent' }),
         browser: [`${BOT_NAME} - ${session.label}`, 'Chrome', '1.0.0'],
+        getMessage: async (key) => session.messageStore.get(key.id),
+        msgRetryCounterCache: {
+          get: (key) => session.retryCache.get(key) || 0,
+          set: (key, value) => session.retryCache.set(key, value),
+        },
       });
       session.sock = sock;
       sock.ev.on('creds.update', saveCreds);
@@ -330,8 +359,14 @@ async function startSession(account) {
         if (type !== 'notify') return;
         const msg = messages[0];
         if (!msg?.message) return;
-        if (!isOwnerMessage(msg, session)) return;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        if (msg.key?.id) {
+          session.messageStore.set(msg.key.id, msg.message);
+          if (session.messageStore.size > 256) {
+            session.messageStore.delete(session.messageStore.keys().next().value);
+          }
+        }
+        if (!(await canProcessMessage(sock, msg, session, text))) return;
 
         if (!msg.key.fromMe && getViewOnceMedia(msg.message)) {
           try {
