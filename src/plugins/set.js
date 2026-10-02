@@ -26,7 +26,7 @@ module.exports = {
     }
     await setTimezone(accountId, timezone);
     await sock.sendMessage(from, {
-      text: `🌍 Account timezone set to *${timezone}*. Recurring moderation schedules will use this timezone.`,
+      text: `🌍 Bot timezone set to *${timezone}*.\n\nThis applies account-wide, including all groups and private bot features. Recurring moderation schedules will use this timezone.`,
     });
   },
 };

@@ -39,8 +39,8 @@ module.exports = {
 │  ▸ ${PREFIX}info
 │  ▸ ${PREFIX}status
 │  ▸ ${PREFIX}owner
-│  ▸ ${PREFIX}settimezone <IANA timezone>
-│  ▸ ${PREFIX}settz <IANA timezone>
+│  ▸ ${PREFIX}settimezone <IANA timezone> (global bot time)
+│  ▸ ${PREFIX}settz <IANA timezone> (global bot time)
 │
 ╰──────────────────────╯
 
