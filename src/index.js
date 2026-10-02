@@ -39,6 +39,7 @@ const { getEnabled: getAntiViewOnceEnabled } = require('./lib/antivvStore');
 const { getSettings: getAntilinkSettings } = require('./lib/antilinkStore');
 const { incrementStage, resetStage } = require('./lib/antilinkOffenseStore');
 const { getViewOnceMedia, resendViewOnce } = require('./plugins/vv');
+const { startModerationScheduler } = require('./lib/moderationScheduler');
 
 process.on('uncaughtException', (err) => console.error('🔥 Uncaught Exception:', err));
 process.on('unhandledRejection', (reason) => console.error('🔥 Unhandled Rejection:', reason));
@@ -587,6 +588,8 @@ const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => console.log(`🌐 Health check server running on port ${PORT}`));
 attachDashboardWebSocket(server, { getStatus: getDashboardStatus });
 
-startAllSessions().catch((error) => {
-  console.error('🔥 Could not start WhatsApp accounts:', error);
-});
+startAllSessions()
+  .then(() => startModerationScheduler(sessions))
+  .catch((error) => {
+    console.error('🔥 Could not start WhatsApp accounts:', error);
+  });

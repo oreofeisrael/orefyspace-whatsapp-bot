@@ -39,6 +39,8 @@ module.exports = {
 │  ▸ ${PREFIX}info
 │  ▸ ${PREFIX}status
 │  ▸ ${PREFIX}owner
+│  ▸ ${PREFIX}settimezone <IANA timezone>
+│  ▸ ${PREFIX}settz <IANA timezone>
 │
 ╰──────────────────────╯
 
@@ -64,12 +66,16 @@ module.exports = {
 │  ▸ ${PREFIX}add <number>
 │  ▸ ${PREFIX}groupmute
 │  ▸ ${PREFIX}groupunmute
+│  ▸ ${PREFIX}schedule mute HH:MM daily
+│  ▸ ${PREFIX}schedule unmute HH:MM weekdays
+│  ▸ ${PREFIX}schedules
+│  ▸ ${PREFIX}cancelschedule <id>
 │
 ╰────────────────────────────╯
 
 ╭──〔 ✦ *UPCOMING* ✦ 〕──╮
 │
-│  ▸ Scheduled moderation rules
+│  ✓ Scheduled group mute/unmute rules
 │  ▸ Moderation analytics and reports
 │  ▸ Sticker and expanded media tools
 │  ▸ Multi-language command support

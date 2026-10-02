@@ -7,11 +7,14 @@ function loadPlugins() {
 
   for (const file of fs.readdirSync(pluginsDir)) {
     if (!file.endsWith('.js')) continue;
-    const plugin = require(path.join(pluginsDir, file));
-    if (plugin.command && typeof plugin.execute === 'function') {
-      const commands = Array.isArray(plugin.command) ? plugin.command : [plugin.command];
-      for (const cmd of commands) {
-        plugins.set(cmd.toLowerCase(), plugin);
+    const loaded = require(path.join(pluginsDir, file));
+    const pluginEntries = Array.isArray(loaded) ? loaded : [loaded];
+    for (const plugin of pluginEntries) {
+      if (plugin.command && typeof plugin.execute === 'function') {
+        const commands = Array.isArray(plugin.command) ? plugin.command : [plugin.command];
+        for (const cmd of commands) {
+          plugins.set(cmd.toLowerCase(), plugin);
+        }
       }
     }
   }
