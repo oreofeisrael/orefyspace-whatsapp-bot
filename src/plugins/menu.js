@@ -37,7 +37,11 @@ module.exports = {
 │  ▸ ${PREFIX}ping
 │  ▸ ${PREFIX}menu
 │  ▸ ${PREFIX}info
-│  ▸ ${PREFIX}status
+│  ▸ ${PREFIX}botstatus
+│  ▸ ${PREFIX}status on/off [no-dl] [jid]
+│  ▸ ${PREFIX}react on/off (green-heart reactions)
+│  ▸ ${PREFIX}online on/off (always online)
+│  ▸ ${PREFIX}call on/off (reject non-owner calls)
 │  ▸ ${PREFIX}owner
 │  ▸ ${PREFIX}settimezone <IANA timezone> (global bot time)
 │  ▸ ${PREFIX}settz <IANA timezone> (global bot time)

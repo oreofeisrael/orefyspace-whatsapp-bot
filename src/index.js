@@ -4,6 +4,8 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   jidNormalizedUser,
+  downloadMediaMessage,
+  getContentType,
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
@@ -40,6 +42,7 @@ const { getSettings: getAntilinkSettings } = require('./lib/antilinkStore');
 const { incrementStage, resetStage } = require('./lib/antilinkOffenseStore');
 const { getViewOnceMedia, resendViewOnce } = require('./plugins/vv');
 const { startModerationScheduler } = require('./lib/moderationScheduler');
+const { getSettings } = require('./lib/accountSettingsStore');
 
 process.on('uncaughtException', (err) => console.error('🔥 Uncaught Exception:', err));
 process.on('unhandledRejection', (reason) => console.error('🔥 Unhandled Rejection:', reason));
@@ -135,6 +138,7 @@ function getOrCreateSession(account) {
       pairingNotificationPending: false,
       messageStore: new Map(),
       retryCache: new Map(),
+      onlineTimer: null,
     };
     sessions.set(account.account_id, session);
   } else {
@@ -143,6 +147,7 @@ function getOrCreateSession(account) {
     session.waJid = account.wa_jid || session.waJid || null;
     session.messageStore ||= new Map();
     session.retryCache ||= new Map();
+    session.onlineTimer ||= null;
   }
   return session;
 }
@@ -251,6 +256,78 @@ async function handleAntilink(session, msg, text) {
   return true;
 }
 
+async function handleAutomaticStatus(sock, msg, session) {
+  if (msg.key?.remoteJid !== 'status@broadcast' || msg.key?.fromMe) return;
+  const settings = await getSettings(session.accountId);
+  if (!settings.auto_status_view) return;
+
+  try {
+    await sock.readMessages([msg.key]);
+    if (!settings.auto_status_download) return;
+
+    const contentType = getContentType(msg.message);
+    const media = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'].includes(contentType);
+    if (!media) return;
+
+    const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+      logger: pino({ level: 'silent' }),
+      reuploadRequest: sock.updateMediaMessage,
+    });
+    const destination = sock.user?.id ? jidNormalizedUser(sock.user.id) : null;
+    if (!destination) return;
+
+    const sender = msg.key.participant || msg.key.remoteJid;
+    const caption = settings.auto_status_include_jid
+      ? `👁️ Auto-viewed status\n🆔 ${sender}`
+      : '👁️ Auto-viewed status';
+    const source = msg.message[contentType] || {};
+    const payload = { caption };
+    if (contentType === 'imageMessage') payload.image = buffer;
+    if (contentType === 'videoMessage') payload.video = buffer;
+    if (contentType === 'audioMessage') {
+      payload.audio = buffer;
+      payload.mimetype = source.mimetype || 'audio/mp4';
+      delete payload.caption;
+    }
+    if (contentType === 'documentMessage') {
+      payload.document = buffer;
+      payload.mimetype = source.mimetype || 'application/octet-stream';
+      payload.fileName = source.fileName || `status-${Date.now()}`;
+    }
+    await sock.sendMessage(destination, payload);
+  } catch (error) {
+    console.error(`❌ Automatic status handling failed for ${session.accountId}:`, error.message);
+  }
+}
+
+async function handleAutomaticReaction(sock, msg, session) {
+  if (msg.key?.fromMe || msg.key?.remoteJid === 'status@broadcast' || msg.key?.remoteJid === 'call_log@broadcast') return;
+  if (!msg.key?.id || msg.message?.protocolMessage || msg.message?.reactionMessage) return;
+  const settings = await getSettings(session.accountId);
+  if (!settings.status_view_emoji) return;
+  try {
+    await sock.sendMessage(msg.key.remoteJid, { react: { text: '💚', key: msg.key } });
+  } catch (error) {
+    console.error(`❌ Auto-reaction failed for ${session.accountId}:`, error.message);
+  }
+}
+
+async function configureAlwaysOnline(sock, session) {
+  if (!session.onlineTimer) {
+    session.onlineTimer = setInterval(async () => {
+      try {
+        const settings = await getSettings(session.accountId);
+        if (session.sock !== sock || session.connectionState !== 'connected') return;
+        await sock.sendPresenceUpdate(settings.always_online ? 'available' : 'unavailable');
+      } catch (error) {
+        console.error(`⚠️ Presence update failed for ${session.accountId}:`, error.message);
+      }
+    }, 20000);
+  }
+  const settings = await getSettings(session.accountId);
+  await sock.sendPresenceUpdate(settings.always_online ? 'available' : 'unavailable');
+}
+
 async function startSession(account) {
   const session = getOrCreateSession(account);
   if (startLocks.has(session.accountId)) return startLocks.get(session.accountId);
@@ -313,6 +390,7 @@ async function startSession(account) {
           session.lastDisconnectAt = new Date().toISOString();
           session.qrDataUrl = null;
           session.sock = null;
+          if (session.onlineTimer) { clearInterval(session.onlineTimer); session.onlineTimer = null; }
           publishStatus();
           console.log(`Connection closed for ${session.accountId}. Reconnecting: ${shouldReconnect} | code: ${statusCode}`);
           if (!session.deleting && statusCode === DisconnectReason.loggedOut && session.accountId !== 'primary') {
@@ -345,12 +423,30 @@ async function startSession(account) {
           session.lastConnectedAt = new Date().toISOString();
           session.qrDataUrl = null;
           publishStatus();
+          configureAlwaysOnline(sock, session).catch((error) => console.error(`⚠️ Could not configure presence for ${session.accountId}:`, error.message));
           console.log(`✅ ${BOT_NAME} account ${session.accountId} connected to WhatsApp`);
           if (session.pairingNotificationPending) {
             session.pairingNotificationPending = false;
             sock.sendMessage(jidNormalizedUser(session.waJid), {
               text: `✅ WhatsApp linked successfully to ${BOT_NAME}.\n\nYour pairing-code connection is active and ready to use. Send ${PREFIX}menu to see the available commands.`,
             }).catch((error) => console.error(`⚠️ Could not send pairing confirmation for ${session.accountId}:`, error.message));
+          }
+        }
+      });
+
+      sock.ev.on('call', async (calls) => {
+        const settings = await getSettings(session.accountId);
+        if (!settings.reject_calls) return;
+        for (const call of calls || []) {
+          const caller = phoneFromJid(call.from);
+          const owner = normalizePhone(session.phoneNumber || phoneFromJid(session.waJid));
+          if (caller && caller !== owner && call.id && call.from) {
+            try {
+              await sock.rejectCall(call.id, call.from);
+              console.log(`📵 Rejected call from ${caller} on ${session.accountId}`);
+            } catch (error) {
+              console.error(`❌ Call rejection failed for ${session.accountId}:`, error.message);
+            }
           }
         }
       });
@@ -366,6 +462,8 @@ async function startSession(account) {
             session.messageStore.delete(session.messageStore.keys().next().value);
           }
         }
+        await handleAutomaticStatus(sock, msg, session);
+        await handleAutomaticReaction(sock, msg, session);
         if (!(await canProcessMessage(sock, msg, session, text))) return;
 
         if (!msg.key.fromMe && getViewOnceMedia(msg.message)) {
