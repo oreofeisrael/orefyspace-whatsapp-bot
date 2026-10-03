@@ -549,11 +549,11 @@ async function createAndStartAccount(label) {
   return sessionStatus(sessions.get(account.accountId));
 }
 
-async function waitForPairingSocket(accountId, timeoutMs = 15000) {
+async function waitForPairingSocket(accountId, timeoutMs = 30000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const session = sessions.get(accountId);
-    if (session?.sock && session.isRegistered === false) return session;
+    if (session?.sock && session.connectionState === 'connected' && session.isRegistered === false) return session;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return sessions.get(accountId);
@@ -639,7 +639,7 @@ async function handlePairingCode(req, res, accountId) {
   const phoneNumber = String(req.body?.phoneNumber || '').replace(/\D/g, '');
   if (!session) return res.status(404).json({ error: 'Account not found.' });
   if (!/^\d{8,15}$/.test(phoneNumber)) return res.status(400).json({ error: 'Enter a valid phone number with country code.' });
-  if (!session.sock || session.isRegistered === null) return res.status(503).json({ error: 'This account is still starting. Try again shortly.' });
+  if (!session.sock || session.connectionState !== 'connected' || session.isRegistered === null) return res.status(503).json({ error: 'This account is still connecting to WhatsApp. Try again shortly.' });
   if (session.isRegistered) return res.status(409).json({ error: 'This account is already linked.' });
 
   const duplicate = [...sessions.values()].find((candidate) =>
@@ -680,8 +680,8 @@ app.post('/api/public/pairing-code', async (req, res) => {
     }
     const account = await createAndStartAccount(req.body?.label || `WhatsApp ${phoneNumber.slice(-4)}`);
     const session = await waitForPairingSocket(account.accountId);
-    if (!session?.sock || session.isRegistered !== false) {
-      return res.status(503).json({ accountId: account.accountId, error: 'The pairing session is still starting. Please try again shortly.' });
+    if (!session?.sock || session.connectionState !== 'connected' || session.isRegistered !== false) {
+      return res.status(503).json({ accountId: account.accountId, error: 'The pairing session did not finish connecting to WhatsApp. Please try again shortly.' });
     }
     const code = await session.sock.requestPairingCode(phoneNumber);
     session.pairingNotificationPending = true;
