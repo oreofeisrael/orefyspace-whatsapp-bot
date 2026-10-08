@@ -639,7 +639,7 @@ async function handlePairingCode(req, res, accountId) {
   const phoneNumber = String(req.body?.phoneNumber || '').replace(/\D/g, '');
   if (!session) return res.status(404).json({ error: 'Account not found.' });
   if (!/^\d{8,15}$/.test(phoneNumber)) return res.status(400).json({ error: 'Enter a valid phone number with country code.' });
-  if (!session.sock || session.connectionState !== 'connected' || session.isRegistered === null) return res.status(503).json({ error: 'This account is still connecting to WhatsApp. Try again shortly.' });
+  if (!session.sock || session.isRegistered === null) return res.status(503).json({ error: 'This account is still starting. Try again shortly.' });
   if (session.isRegistered) return res.status(409).json({ error: 'This account is already linked.' });
 
   const duplicate = [...sessions.values()].find((candidate) =>
@@ -657,6 +657,7 @@ async function handlePairingCode(req, res, accountId) {
   if (remaining > 0) return res.status(429).json({ error: `Try again in ${Math.ceil(remaining / 1000)} seconds.` });
   pairingRequests.set(session.accountId, Date.now());
   try {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     const code = await session.sock.requestPairingCode(phoneNumber);
     session.pairingNotificationPending = true;
     return res.json({ accountId: session.accountId, code });
@@ -680,9 +681,10 @@ app.post('/api/public/pairing-code', async (req, res) => {
     }
     const account = await createAndStartAccount(req.body?.label || `WhatsApp ${phoneNumber.slice(-4)}`);
     const session = await waitForPairingSocket(account.accountId);
-    if (!session?.sock || session.connectionState !== 'connected' || session.isRegistered !== false) {
-      return res.status(503).json({ accountId: account.accountId, error: 'The pairing session did not finish connecting to WhatsApp. Please try again shortly.' });
+    if (!session?.sock || session.isRegistered !== false) {
+      return res.status(503).json({ accountId: account.accountId, error: 'The pairing session is still starting. Please try again shortly.' });
     }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     const code = await session.sock.requestPairingCode(phoneNumber);
     session.pairingNotificationPending = true;
     res.status(201).json({ accountId: account.accountId, label: account.label, code });
