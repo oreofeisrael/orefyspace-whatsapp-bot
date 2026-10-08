@@ -136,6 +136,9 @@ function getOrCreateSession(account) {
       startTimer: null,
       deleting: false,
       pairingNotificationPending: false,
+      pairingPhone: null,
+      pairingCode: null,
+      pairingCodeRequested: false,
       messageStore: new Map(),
       retryCache: new Map(),
       onlineTimer: null,
@@ -147,6 +150,9 @@ function getOrCreateSession(account) {
     session.waJid = account.wa_jid || session.waJid || null;
     session.messageStore ||= new Map();
     session.retryCache ||= new Map();
+    session.pairingPhone ||= null;
+    session.pairingCode ||= null;
+    session.pairingCodeRequested ||= false;
     session.onlineTimer ||= null;
   }
   return session;
@@ -360,17 +366,6 @@ async function startSession(account) {
       session.sock = sock;
       sock.ev.on('creds.update', saveCreds);
 
-      if (USE_PAIRING_CODE && !state.creds.registered && process.env.PHONE_NUMBER) {
-        setTimeout(async () => {
-          try {
-            const code = await sock.requestPairingCode(process.env.PHONE_NUMBER.replace(/\D/g, ''));
-            console.log(`🔗 Pairing code for ${session.accountId}:`, code);
-          } catch (error) {
-            console.error(`❌ Automatic pairing failed for ${session.accountId}:`, error.message);
-          }
-        }, 3000);
-      }
-
       sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
@@ -381,6 +376,21 @@ async function startSession(account) {
               publishStatus();
             })
             .catch((error) => console.error(`❌ QR image error for ${session.accountId}:`, error));
+
+          if (session.pairingPhone && !state.creds.registered && !session.pairingCodeRequested) {
+            session.pairingCodeRequested = true;
+            sock.requestPairingCode(session.pairingPhone)
+              .then((code) => {
+                session.pairingCode = code;
+                session.pairingNotificationPending = true;
+                publishStatus();
+                console.log(`🔗 Pairing code generated for ${session.accountId}`);
+              })
+              .catch((error) => {
+                session.pairingCodeRequested = false;
+                console.error(`❌ Pairing-code request failed for ${session.accountId}:`, error.message);
+              });
+          }
         }
 
         if (connection === 'close') {
@@ -389,6 +399,9 @@ async function startSession(account) {
           session.connectionState = shouldReconnect ? 'reconnecting' : 'logged_out';
           session.lastDisconnectAt = new Date().toISOString();
           session.qrDataUrl = null;
+          session.pairingPhone = null;
+          session.pairingCode = null;
+          session.pairingCodeRequested = false;
           session.sock = null;
           if (session.onlineTimer) { clearInterval(session.onlineTimer); session.onlineTimer = null; }
           publishStatus();
@@ -416,6 +429,8 @@ async function startSession(account) {
         } else if (connection === 'open') {
           session.connectionState = 'connected';
           session.isRegistered = true;
+          session.pairingPhone = null;
+          session.pairingCodeRequested = false;
           session.waJid = sock.user?.id || session.waJid;
           session.phoneNumber = phoneFromJid(session.waJid) || session.phoneNumber;
           updateSessionIdentity(session.accountId, session.phoneNumber, session.waJid)
@@ -541,19 +556,21 @@ async function getPairingStatus() {
   };
 }
 
-async function createAndStartAccount(label) {
+async function createAndStartAccount(label, pairingPhone = null) {
   if (sessions.size >= MAX_SESSIONS) throw new Error(`Maximum of ${MAX_SESSIONS} accounts reached.`);
   const account = await createSessionAccount(label);
-  getOrCreateSession({ account_id: account.accountId, label: account.label });
+  const session = getOrCreateSession({ account_id: account.accountId, label: account.label });
+  session.pairingPhone = pairingPhone;
   await startSession({ account_id: account.accountId, label: account.label });
   return sessionStatus(sessions.get(account.accountId));
 }
 
-async function waitForPairingSocket(accountId, timeoutMs = 30000) {
+async function waitForPairingCode(accountId, timeoutMs = 30000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const session = sessions.get(accountId);
-    if (session?.sock && session.connectionState === 'connected' && session.isRegistered === false) return session;
+    if (session?.pairingCode) return session;
+    if (session?.isRegistered === true) return session;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return sessions.get(accountId);
@@ -679,15 +696,12 @@ app.post('/api/public/pairing-code', async (req, res) => {
     if (duplicate) {
       return res.status(409).json({ error: 'This WhatsApp number is already connected.' });
     }
-    const account = await createAndStartAccount(req.body?.label || `WhatsApp ${phoneNumber.slice(-4)}`);
-    const session = await waitForPairingSocket(account.accountId);
-    if (!session?.sock || session.isRegistered !== false) {
-      return res.status(503).json({ accountId: account.accountId, error: 'The pairing session is still starting. Please try again shortly.' });
+    const account = await createAndStartAccount(req.body?.label || `WhatsApp ${phoneNumber.slice(-4)}`, phoneNumber);
+    const session = await waitForPairingCode(account.accountId);
+    if (!session?.sock || session.isRegistered !== false || !session.pairingCode) {
+      return res.status(503).json({ accountId: account.accountId, error: 'The pairing code is not ready yet. Please try again shortly.' });
     }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const code = await session.sock.requestPairingCode(phoneNumber);
-    session.pairingNotificationPending = true;
-    res.status(201).json({ accountId: account.accountId, label: account.label, code });
+    res.status(201).json({ accountId: account.accountId, label: account.label, code: session.pairingCode });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
